@@ -3,6 +3,8 @@ name = "pallet"
 version = "0.2.0"
 authors = ["Jacob Brown <kardeiz@gmail.com>"]
 edition = "2018"
+license = "MIT"
+description = "Document store built with sled and tantivy"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
