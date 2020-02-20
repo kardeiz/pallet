@@ -1,11 +1,12 @@
 [package]
 name = "pallet"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Jacob Brown <kardeiz@gmail.com>"]
 edition = "2018"
 license = "MIT"
 description = "Document store built with sled and tantivy"
-
+readme = "README.md"
+repository = "https://github.com/kardeiz/pallet"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
