@@ -1,0 +1,19 @@
+[package]
+name = "pallet-macros"
+version = "0.3.0"
+authors = ["Jacob Brown <kardeiz@gmail.com>"]
+edition = "2018"
+license = "MIT"
+description = "Document store built with sled and tantivy"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1"
+proc-macro2 = "1"
+
+[dependencies.syn]
+features = ["full", "extra-traits"]
+version = "1"
+

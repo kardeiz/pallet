@@ -1,3 +1,19 @@
+# pallet
+
+[![Docs](https://docs.rs/pallet/badge.svg)](https://docs.rs/crate/pallet/)
+[![Crates.io](https://img.shields.io/crates/v/pallet.svg)](https://crates.io/crates/pallet)
+
+
+A searchable document database built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
+
+Provides a "Typed Tree" interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
+but also Lucene/Elastic style searching.
+
+The included `pallet_macros` crate provides an easy way to derive `pallet::DocumentLike` for data structs.
+
+## Usage
+
+```rust
 #[derive(serde::Serialize, serde::Deserialize, Debug, pallet::Document)]
 #[pallet(tree_name = "books")]
 pub struct Book {
@@ -43,3 +59,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+```
+
+## Changelog
+
+### 0.3.0
+
+* Add `pallet_macros` to derive `pallet::DocumentLike`
+
+
+<hr/>
+
+Current version: 0.3.0
+
+License: MIT
