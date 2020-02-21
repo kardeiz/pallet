@@ -1,16 +1,18 @@
 /*!
 
-A searchable document database built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
+A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
 
-Provides a "Typed Tree" interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
-but also Lucene/Elastic style searching.
+Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
+but also Lucene/Elasticsearch style searching.
 
 The included `pallet_macros` crate provides an easy way to derive `pallet::DocumentLike` for data structs.
 
 # Usage
 
 ```rust,no_run
-#[derive(serde::Serialize, serde::Deserialize, Debug, pallet::Document)]
+#[macro_use] extern crate serde;
+
+#[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
 pub struct Book {
     #[pallet(default_search_field)]
@@ -26,8 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store =
-        pallet::Store::<Book>::builder().with_db(db.clone()).with_index_dir(temp_dir.path()).finish()?;
+    let store = pallet::Store::<Book>::builder()
+        .with_db(db.clone())
+        .with_index_dir(temp_dir.path())
+        .finish()?;
 
     let books = vec![
         Book {
@@ -57,7 +61,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+# `pallet_macros`
+
+See the example for usage. The following attributes can be used to customize the implementation:
+
+* `tree_name`: A container level attribute to specify the `sled::Tree` name.
+* `index_field_name`: Rename the field in the search schema.
+* `index_field_type`: Set the index field type, must implement `Into<tantivy::schema::Value>`.
+* `index_field_options`: Set the index field options. By default, the options for `String` is
+`tantivy::schema::TEXT`, and the options for numeric types is `tantivy::schema::INDEXED`.
+* `default_search_field`: Include this field in the list of default search fields.
+* `skip_indexing`: Do not index this field.
+
 # Changelog
+
+## 0.3.2
+
+* Add some docs
 
 ## 0.3.0
 
@@ -70,15 +90,19 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 
-pub use pallet_macros::Document;
+/// Re-export the `pallet_macros` derive type.
+pub use pallet_macros::DocumentLike;
 
+/// Re-exports `tantivy` and `sled` for use by `pallet_macros` and convenience.
 pub mod ext {
-    pub use tantivy;
     pub use sled;
+    pub use tantivy;
 }
 
+/// Error management
 pub mod err {
 
+    /// Error container
     #[derive(thiserror::Error, Debug)]
     pub enum Error {
         #[error("Search engine error: `{0}`")]
@@ -89,15 +113,12 @@ pub mod err {
         Sled(#[from] sled::Error),
         #[error("De/serialization error: `{0}`")]
         Bincode(#[from] bincode::Error),
-        #[error("Unknown error")]
-        Unknown,
-        #[error("Store build error: {0}")]
-        StoreBuilder(&'static str),
-        #[error("Custom error: {0}")]
+        #[error("Error: {0}")]
         Custom(Box<str>),
     }
 
     impl Error {
+        /// Create a custom error.
         pub fn custom<T: std::fmt::Display>(t: T) -> Self {
             Error::Custom(t.to_string().into_boxed_str())
         }
@@ -128,13 +149,19 @@ pub mod err {
 }
 
 mod field_value;
+
+#[doc(hidden)]
+// For use primarily by `pallet_macros`.
 pub use field_value::FieldValue;
 
+/// Like `tantivy`'s `TopDocs` collector, but without any limit.
 #[derive(Default)]
 pub struct ScoredDocs {
     size_hint: Option<usize>,
 }
 
+#[doc(hidden)]
+// Used by the `ScoredDocs` collector.
 pub struct ScoredDocsSegmentCollector {
     segment_local_id: tantivy::SegmentLocalId,
     buffer: Vec<(tantivy::Score, tantivy::DocAddress)>,
@@ -178,26 +205,32 @@ impl tantivy::collector::SegmentCollector for ScoredDocsSegmentCollector {
     }
 }
 
+/// `Document` wrapper that includes the search query score.
 #[derive(Debug, Clone)]
 pub struct Hit<T> {
     pub score: f32,
     pub doc: Document<T>,
 }
 
+/// Search results container, contains the `count` of returned results.
 #[derive(Debug, Clone)]
 pub struct Results<T> {
     pub count: usize,
     pub hits: Vec<Hit<T>>,
 }
 
+/// Persisted wrapper of the internal document, includes `id`.
 #[derive(Debug, Clone)]
 pub struct Document<T> {
     pub id: u64,
     pub inner: T,
 }
 
+#[doc(hidden)]
+// For use primarily by `pallet_macros`.
 pub struct IndexFieldsVec(pub Vec<tantivy::schema::Field>);
 
+/// The document store, contains the `sled::Tree` and `tantivy::Index`.
 pub struct Store<T: DocumentLike> {
     generate_id: Box<dyn Fn() -> err::Result<u64> + Sync>,
     tree: sled::Tree,
@@ -210,6 +243,7 @@ pub struct Store<T: DocumentLike> {
 }
 
 impl<T: DocumentLike> Store<T> {
+    /// Builder for a new `Store`
     pub fn builder() -> StoreBuilder<T> {
         StoreBuilder {
             db: None,
@@ -223,23 +257,24 @@ impl<T: DocumentLike> Store<T> {
         }
     }
 
-    fn default_search_fields(&self) -> Vec<tantivy::schema::Field> {
+    /// The fields that should be used as default search fields in a search.
+    pub fn default_search_fields(&self) -> Vec<tantivy::schema::Field> {
         T::default_search_fields(&self.index_fields)
     }
 
-    fn index_writer(&self) -> err::Result<tantivy::IndexWriter> {
+    /// Get a `tantivy::IndexWriter` from the stored `tantivy::Index`.
+    pub fn index_writer(&self) -> err::Result<tantivy::IndexWriter> {
         Ok((&self.index_writer_accessor)(&self.index)?)
     }
 
+    /// Create a new `Document`, returns the persisted document's `id`.
     pub fn create(&self, inner: &T) -> err::Result<u64> {
-
-        let id =
-            self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
+        let id = self.tree.transaction(
+            |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
                 let mut index_writer =
                     self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
-                let id = (self.generate_id)()
-                    .map_err(sled::ConflictableTransactionError::Abort)?;
+                let id = (self.generate_id)().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let serialized_inner = bincode::serialize(inner)
                     .map_err(err::Error::Bincode)
@@ -261,23 +296,24 @@ impl<T: DocumentLike> Store<T> {
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 Ok(id)
-            })?;
+            },
+        )?;
 
         Ok(id)
     }
 
+    /// Create new `Document`s, returns the persisted documents' `id`s.
     pub fn create_multi(&self, inners: &[T]) -> err::Result<Vec<u64>> {
-
-        let ids =
-            self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
+        let ids = self.tree.transaction(
+            |tree| -> sled::ConflictableTransactionResult<_, err::Error> {
                 let mut out = Vec::with_capacity(inners.len());
 
                 let mut index_writer =
                     self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 for inner in inners {
-                    let id = (self.generate_id)()
-                        .map_err(sled::ConflictableTransactionError::Abort)?;
+                    let id =
+                        (self.generate_id)().map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let serialized_inner = bincode::serialize(inner)
                         .map_err(err::Error::Bincode)
@@ -302,17 +338,19 @@ impl<T: DocumentLike> Store<T> {
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 Ok(out)
-            })?;
+            },
+        )?;
 
         Ok(ids)
     }
 
+    /// Update a given `Document`.
     pub fn update(&self, doc: &Document<T>) -> err::Result<()> {
         self.update_multi(std::slice::from_ref(doc))
     }
 
+    /// Update given `Document`s.
     pub fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
-
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
                 self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
@@ -346,12 +384,13 @@ impl<T: DocumentLike> Store<T> {
         Ok(())
     }
 
+    /// Delete a `Document` by `id`.
     pub fn delete(&self, id: u64) -> err::Result<()> {
         self.delete_multi(&[id])
     }
 
+    /// Delete `Document`s by `id`s.
     pub fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
-
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
                 self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
@@ -373,6 +412,7 @@ impl<T: DocumentLike> Store<T> {
         Ok(())
     }
 
+    /// Search the datastore, using the query language provided by `tantivy`.
     pub fn search(&self, query_str: &str) -> err::Result<Results<T>> {
         use rayon::prelude::*;
 
@@ -385,12 +425,12 @@ impl<T: DocumentLike> Store<T> {
 
         let query = query_parser.parse_query(query_str)?;
 
-        let top_docs_handle = ScoredDocs { size_hint: None };
+        let scored_docs_handle = ScoredDocs { size_hint: None };
         let count_handle = tantivy::collector::Count;
 
-        let (count, top_docs) = searcher.search(&query, &(count_handle, top_docs_handle))?;
+        let (count, scored_docs) = searcher.search(&query, &(count_handle, scored_docs_handle))?;
 
-        let ids_and_scores = top_docs
+        let ids_and_scores = scored_docs
             .into_iter()
             .filter_map(|(score, addr)| {
                 let opt_id = searcher
@@ -412,9 +452,10 @@ impl<T: DocumentLike> Store<T> {
         Ok(Results { count, hits })
     }
 
+    /// Get all `Documents` from the datastore. Does not use the search index.
     pub fn all(&self) -> err::Result<Vec<Document<T>>> {
-
-        Ok(self.tree
+        Ok(self
+            .tree
             .iter()
             .flat_map(|x| x)
             .map(|(k, v)| {
@@ -426,6 +467,7 @@ impl<T: DocumentLike> Store<T> {
             .collect::<err::Result<Vec<_>>>()?)
     }
 
+    /// Index (or re-index) all `Documents` in the datastore.
     pub fn index_all(&self) -> err::Result<()> {
         let docs = self.all()?;
 
@@ -446,9 +488,10 @@ impl<T: DocumentLike> Store<T> {
         Ok(())
     }
 
+    /// Find a single `Document` by its `id`. Does not use the search index.
     pub fn find(&self, id: u64) -> err::Result<Option<Document<T>>> {
-
-        Ok(self.tree
+        Ok(self
+            .tree
             .get(id.to_le_bytes())?
             .map(|bytes| bincode::deserialize(&bytes))
             .transpose()?
@@ -456,6 +499,7 @@ impl<T: DocumentLike> Store<T> {
     }
 }
 
+/// The `Store` builder struct
 pub struct StoreBuilder<T> {
     db: Option<sled::Db>,
     marker: PhantomData<fn(T)>,
@@ -469,21 +513,30 @@ pub struct StoreBuilder<T> {
 }
 
 impl<T: DocumentLike> StoreBuilder<T> {
+    /// Use the given `sled::Db` for this `Store`.
     pub fn with_db(mut self, db: sled::Db) -> Self {
         self.db = Some(db);
         self
     }
 
+    /// Use the given directory (must exist) for the `tantivy::Index`.
     pub fn with_index_dir<I: Into<PathBuf>>(mut self, index_dir: I) -> Self {
         self.index_dir = Some(index_dir.into());
         self
     }
 
+    /// Use the given name for the internal `sled::Tree`.
+    ///
+    /// This can be provided alternatively by implementing `DocumentLike::tree_name`
+    /// for your document type.
     pub fn with_tree_name<I: Into<String>>(mut self, tree_name: I) -> Self {
         self.tree_name = Some(tree_name.into());
         self
     }
 
+    /// Define a custom way to get the `tantivy::IndexWriter`.
+    ///
+    /// By default will use `tantivy_index.writer(128_000_000)`.
     pub fn with_index_writer_accessor<F>(mut self, index_writer_accessor: F) -> Self
     where
         F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Sync + 'static,
@@ -492,6 +545,9 @@ impl<T: DocumentLike> StoreBuilder<T> {
         self
     }
 
+    /// Custom configuration for the `tantivy::Index`.
+    ///
+    /// By default will use `tantivy_index.set_default_multithread_executor()?`.
     pub fn with_index_configuration<F>(mut self, index_configuration: F) -> Self
     where
         F: Fn(&mut tantivy::Index) -> tantivy::Result<()> + 'static,
@@ -500,21 +556,20 @@ impl<T: DocumentLike> StoreBuilder<T> {
         self
     }
 
+    /// Finish the builder and return the `Store`.
     pub fn finish(mut self) -> err::Result<Store<T>> {
-        let db =
-            self.db.ok_or_else(|| err::Error::StoreBuilder("`db` not set"))?;
-        
-        let index_dir =
-            self.index_dir.ok_or_else(|| err::Error::StoreBuilder("`index_dir` not set"))?;
-        
+        let db = self.db.ok_or_else(|| err::Error::custom("`db` not set"))?;
+
+        let index_dir = self.index_dir.ok_or_else(|| err::Error::custom("`index_dir` not set"))?;
+
         let tree_name = self
             .tree_name
             .or_else(|| T::tree_name())
-            .ok_or_else(|| err::Error::StoreBuilder("`tree_name` not set"))?;
+            .ok_or_else(|| err::Error::custom("`tree_name` not set"))?;
 
         let tree = db.open_tree(tree_name.as_bytes())?;
 
-        let generate_id = Box::new(move || db.generate_id().map_err(err::Error::from) );
+        let generate_id = Box::new(move || db.generate_id().map_err(err::Error::from));
 
         let index_fields = T::index_fields(&mut self.schema_builder)?;
 
@@ -555,21 +610,31 @@ impl<T: DocumentLike> StoreBuilder<T> {
     }
 }
 
+/// Defines methods for building the index schema and creating a `tantivy::Document`.
+///
+/// `pallet_macros` provides a way to automatically derive this trait.
 pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned + Send {
+    /// The container for an index's fields.
+    ///
+    /// Using `pallet_macros`, this is a wrapped `Vec<tantivy::schema::Field>`.
     type IndexFieldsType: Sync;
 
+    /// Given the specified fields container, return fields that should be used for the default search.
     fn default_search_fields(_index_fields: &Self::IndexFieldsType) -> Vec<tantivy::schema::Field> {
         Vec::new()
     }
 
+    /// Alternative way to set the `sled::Tree` name.
     fn tree_name() -> Option<String> {
         None
     }
 
+    /// Adds all fields to the given `tantivy::schema::SchemaBuilder` and returns the fields container.
     fn index_fields(
         schema_builder: &mut tantivy::schema::SchemaBuilder,
     ) -> err::Result<Self::IndexFieldsType>;
 
+    /// Given the specified document and fields container, returns a `tantivy::Document`.
     fn as_search_document(
         &self,
         index_fields: &Self::IndexFieldsType,

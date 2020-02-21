@@ -8,7 +8,7 @@ extern crate syn;
 
 use proc_macro::TokenStream;
 
-#[proc_macro_derive(Document, attributes(pallet))]
+#[proc_macro_derive(DocumentLike, attributes(pallet))]
 pub fn document_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::DeriveInput);
     document_derive_inner(input).unwrap()

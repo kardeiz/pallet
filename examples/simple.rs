@@ -1,4 +1,6 @@
-#[derive(serde::Serialize, serde::Deserialize, Debug, pallet::Document)]
+#[macro_use] extern crate serde;
+
+#[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
 pub struct Book {
     #[pallet(default_search_field)]
@@ -14,8 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store =
-        pallet::Store::<Book>::builder().with_db(db.clone()).with_index_dir(temp_dir.path()).finish()?;
+    let store = pallet::Store::<Book>::builder()
+        .with_db(db.clone())
+        .with_index_dir(temp_dir.path())
+        .finish()?;
 
     let books = vec![
         Book {

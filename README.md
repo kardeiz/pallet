@@ -4,17 +4,19 @@
 [![Crates.io](https://img.shields.io/crates/v/pallet.svg)](https://crates.io/crates/pallet)
 
 
-A searchable document database built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
+A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
 
-Provides a "Typed Tree" interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
-but also Lucene/Elastic style searching.
+Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
+but also Lucene/Elasticsearch style searching.
 
 The included `pallet_macros` crate provides an easy way to derive `pallet::DocumentLike` for data structs.
 
 ## Usage
 
 ```rust
-#[derive(serde::Serialize, serde::Deserialize, Debug, pallet::Document)]
+#[macro_use] extern crate serde;
+
+#[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
 pub struct Book {
     #[pallet(default_search_field)]
@@ -30,8 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store =
-        pallet::Store::<Book>::builder().with_db(db.clone()).with_index_dir(temp_dir.path()).finish()?;
+    let store = pallet::Store::<Book>::builder()
+        .with_db(db.clone())
+        .with_index_dir(temp_dir.path())
+        .finish()?;
 
     let books = vec![
         Book {
@@ -61,7 +65,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## `pallet_macros`
+
+See the example for usage. The following attributes can be used to customize the implementation:
+
+* `tree_name`: A container level attribute to specify the `sled::Tree` name.
+* `index_field_name`: Rename the field in the search schema.
+* `index_field_type`: Set the index field type, must implement `Into<tantivy::schema::Value>`.
+* `index_field_options`: Set the index field options. By default, the options for `String` is
+`tantivy::schema::TEXT`, and the options for numeric types is `tantivy::schema::INDEXED`.
+* `default_search_field`: Include this field in the list of default search fields.
+* `skip_indexing`: Do not index this field.
+
 ## Changelog
+
+### 0.3.2
+
+* Add some docs
 
 ### 0.3.0
 
@@ -70,6 +90,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 <hr/>
 
-Current version: 0.3.0
+Current version: 0.3.2
 
 License: MIT
