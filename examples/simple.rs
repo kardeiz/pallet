@@ -1,4 +1,5 @@
-#[macro_use] extern crate serde;
+#[macro_use]
+extern crate serde;
 
 #[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]

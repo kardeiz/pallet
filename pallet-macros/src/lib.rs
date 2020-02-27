@@ -173,13 +173,13 @@ fn document_derive_inner(
         .collect::<Result<Vec<_>, _>>()?;
 
     let index_fields = field_metas.iter()
-        .map(|FieldMeta { name, ty, opts, .. }| quote!(schema_builder.add_field(<#ty as pallet::FieldValue>::field_entry(#name, #opts))))
+        .map(|FieldMeta { name, ty, opts, .. }| quote!(schema_builder.add_field(<#ty as pallet::search::FieldValue>::field_entry(#name, #opts))))
         .collect::<Vec<_>>();
 
     let doc_fields = field_metas.iter().enumerate()
         .map(|(idx, FieldMeta { ident, ty, .. })| 
             quote! {
-                if let Some(val) = <#ty as pallet::FieldValue>::into_value(self.#ident.clone().into()) {
+                if let Some(val) = <#ty as pallet::search::FieldValue>::into_value(self.#ident.clone().into()) {
                     doc.add(pallet::ext::tantivy::schema::FieldValue::new(fields[#idx], val));
                 }
             })
@@ -195,7 +195,7 @@ fn document_derive_inner(
     let out = quote! {
         impl #impl_generics pallet::DocumentLike for #name #ty_generics #where_clause {
 
-            type IndexFieldsType = pallet::IndexFieldsVec;
+            type IndexFieldsType = pallet::search::FieldsContainer;
 
             fn default_search_fields(index_fields: &Self::IndexFieldsType) -> Vec<pallet::ext::tantivy::schema::Field> {
                 let fields = &index_fields.0;
@@ -209,16 +209,16 @@ fn document_derive_inner(
             fn index_fields(
                 schema_builder: &mut pallet::ext::tantivy::schema::SchemaBuilder,
             ) -> pallet::err::Result<Self::IndexFieldsType> {
-                use pallet::FieldValue;
+                use pallet::search::FieldValue;
 
-                Ok(pallet::IndexFieldsVec(vec![#(#index_fields,)*]))
+                Ok(pallet::search::FieldsContainer(vec![#(#index_fields,)*]))
             }
 
-            fn as_search_document(
+            fn as_index_document(
                 &self,
                 index_fields: &Self::IndexFieldsType,
             ) -> pallet::err::Result<pallet::ext::tantivy::Document> {
-                use pallet::FieldValue;
+                use pallet::search::FieldValue;
 
                 let fields = &index_fields.0;
 

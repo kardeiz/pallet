@@ -117,13 +117,6 @@ pub mod err {
         Custom(Box<str>),
     }
 
-    impl Error {
-        /// Create a custom error.
-        pub fn custom<T: std::fmt::Display>(t: T) -> Self {
-            Error::Custom(t.to_string().into_boxed_str())
-        }
-    }
-
     impl From<tantivy::TantivyError> for Error {
         fn from(t: tantivy::TantivyError) -> Self {
             Error::Tantivy(t)
@@ -145,110 +138,42 @@ pub mod err {
         }
     }
 
+    /// Create a custom error.
+    pub fn custom<T: std::fmt::Display>(t: T) -> Error {
+        Error::Custom(t.to_string().into_boxed_str())
+    }
+
     pub type Result<T> = std::result::Result<T, Error>;
 }
 
-mod field_value;
-
-#[doc(hidden)]
-// For use primarily by `pallet_macros`.
-pub use field_value::FieldValue;
-
-/// Like `tantivy`'s `TopDocs` collector, but without any limit.
-#[derive(Default)]
-pub struct ScoredDocs {
-    size_hint: Option<usize>,
-}
-
-#[doc(hidden)]
-// Used by the `ScoredDocs` collector.
-pub struct ScoredDocsSegmentCollector {
-    segment_local_id: tantivy::SegmentLocalId,
-    buffer: Vec<(tantivy::Score, tantivy::DocAddress)>,
-}
-
-impl tantivy::collector::Collector for ScoredDocs {
-    type Fruit = Vec<(tantivy::Score, tantivy::DocAddress)>;
-    type Child = ScoredDocsSegmentCollector;
-
-    fn for_segment(
-        &self,
-        segment_local_id: tantivy::SegmentLocalId,
-        _: &tantivy::SegmentReader,
-    ) -> tantivy::Result<Self::Child> {
-        Ok(ScoredDocsSegmentCollector {
-            segment_local_id,
-            buffer: self.size_hint.map(|size| Vec::with_capacity(size)).unwrap_or_else(Vec::new),
-        })
-    }
-
-    fn requires_scoring(&self) -> bool {
-        true
-    }
-
-    fn merge_fruits(&self, segment_fruits: Vec<Self::Fruit>) -> tantivy::Result<Self::Fruit> {
-        let mut out = segment_fruits.into_iter().flat_map(|x| x).collect::<Vec<_>>();
-        out.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(b.1.cmp(&a.1)));
-        Ok(out)
-    }
-}
-
-impl tantivy::collector::SegmentCollector for ScoredDocsSegmentCollector {
-    type Fruit = Vec<(tantivy::Score, tantivy::DocAddress)>;
-
-    fn collect(&mut self, doc: tantivy::DocId, score: tantivy::Score) {
-        self.buffer.push((score, tantivy::DocAddress(self.segment_local_id, doc)));
-    }
-
-    fn harvest(self) -> Self::Fruit {
-        self.buffer
-    }
-}
-
-/// `Document` wrapper that includes the search query score.
-#[derive(Debug, Clone)]
-pub struct Hit<T> {
-    pub score: f32,
-    pub doc: Document<T>,
-}
-
-/// Search results container, contains the `count` of returned results.
-#[derive(Debug, Clone)]
-pub struct Results<T> {
-    pub count: usize,
-    pub hits: Vec<Hit<T>>,
-}
+/// Items relating to `tantivy` and searching
+pub mod search;
 
 /// Persisted wrapper of the internal document, includes `id`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Document<T> {
     pub id: u64,
     pub inner: T,
 }
 
-#[doc(hidden)]
-// For use primarily by `pallet_macros`.
-pub struct IndexFieldsVec(pub Vec<tantivy::schema::Field>);
-
 /// The document store, contains the `sled::Tree` and `tantivy::Index`.
 pub struct Store<T: DocumentLike> {
-    generate_id: Box<dyn Fn() -> err::Result<u64> + Sync>,
+    generate_id: Box<dyn Fn() -> err::Result<u64> + Send + Sync>,
     tree: sled::Tree,
     marker: PhantomData<fn(T)>,
-    index_fields: T::IndexFieldsType,
-    index: tantivy::Index,
-    index_id_field: tantivy::schema::Field,
-    index_writer_accessor:
-        Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Sync>,
+    pub index: search::Index<T::IndexFieldsType>,
 }
 
 impl<T: DocumentLike> Store<T> {
+    fn generate_id(&self) -> err::Result<u64> {
+        (self.generate_id)()
+    }
+
     /// Builder for a new `Store`
     pub fn builder() -> StoreBuilder<T> {
         StoreBuilder {
             db: None,
             marker: PhantomData,
-            schema_builder: tantivy::schema::SchemaBuilder::default(),
             index_dir: None,
             id_field_name: None,
             tree_name: None,
@@ -257,34 +182,24 @@ impl<T: DocumentLike> Store<T> {
         }
     }
 
-    /// The fields that should be used as default search fields in a search.
-    pub fn default_search_fields(&self) -> Vec<tantivy::schema::Field> {
-        T::default_search_fields(&self.index_fields)
-    }
-
-    /// Get a `tantivy::IndexWriter` from the stored `tantivy::Index`.
-    pub fn index_writer(&self) -> err::Result<tantivy::IndexWriter> {
-        Ok((&self.index_writer_accessor)(&self.index)?)
-    }
-
     /// Create a new `Document`, returns the persisted document's `id`.
     pub fn create(&self, inner: &T) -> err::Result<u64> {
         let id = self.tree.transaction(
             |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
                 let mut index_writer =
-                    self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                    self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
-                let id = (self.generate_id)().map_err(sled::ConflictableTransactionError::Abort)?;
+                let id = self.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let serialized_inner = bincode::serialize(inner)
                     .map_err(err::Error::Bincode)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let mut search_doc = inner
-                    .as_search_document(&self.index_fields)
+                    .as_index_document(&self.index.fields)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                search_doc.add_u64(self.index_id_field, id);
+                search_doc.add_u64(self.index.id_field, id);
 
                 index_writer.add_document(search_doc);
 
@@ -309,21 +224,21 @@ impl<T: DocumentLike> Store<T> {
                 let mut out = Vec::with_capacity(inners.len());
 
                 let mut index_writer =
-                    self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                    self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 for inner in inners {
                     let id =
-                        (self.generate_id)().map_err(sled::ConflictableTransactionError::Abort)?;
+                        self.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let serialized_inner = bincode::serialize(inner)
                         .map_err(err::Error::Bincode)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let mut search_doc = inner
-                        .as_search_document(&self.index_fields)
+                        .as_index_document(&self.index.fields)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                    search_doc.add_u64(self.index_id_field, id);
+                    search_doc.add_u64(self.index.id_field, id);
 
                     index_writer.add_document(search_doc);
 
@@ -353,7 +268,7 @@ impl<T: DocumentLike> Store<T> {
     pub fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
-                self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
             for Document { id, inner } in docs {
                 let serialized_inner = bincode::serialize(inner)
@@ -361,12 +276,12 @@ impl<T: DocumentLike> Store<T> {
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let mut search_doc = inner
-                    .as_search_document(&self.index_fields)
+                    .as_index_document(&self.index.fields)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                search_doc.add_u64(self.index_id_field, *id);
+                search_doc.add_u64(self.index.id_field, *id);
 
-                index_writer.delete_term(tantivy::Term::from_field_u64(self.index_id_field, *id));
+                index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
 
                 index_writer.add_document(search_doc);
 
@@ -393,10 +308,10 @@ impl<T: DocumentLike> Store<T> {
     pub fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
-                self.index_writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
             for id in ids {
-                index_writer.delete_term(tantivy::Term::from_field_u64(self.index_id_field, *id));
+                index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
 
                 tree.remove(&id.to_le_bytes())?;
             }
@@ -413,43 +328,8 @@ impl<T: DocumentLike> Store<T> {
     }
 
     /// Search the datastore, using the query language provided by `tantivy`.
-    pub fn search(&self, query_str: &str) -> err::Result<Results<T>> {
-        use rayon::prelude::*;
-
-        let reader = self.index.reader()?;
-
-        let searcher = reader.searcher();
-
-        let query_parser =
-            tantivy::query::QueryParser::for_index(&self.index, self.default_search_fields());
-
-        let query = query_parser.parse_query(query_str)?;
-
-        let scored_docs_handle = ScoredDocs { size_hint: None };
-        let count_handle = tantivy::collector::Count;
-
-        let (count, scored_docs) = searcher.search(&query, &(count_handle, scored_docs_handle))?;
-
-        let ids_and_scores = scored_docs
-            .into_iter()
-            .filter_map(|(score, addr)| {
-                let opt_id = searcher
-                    .segment_reader(addr.segment_ord())
-                    .fast_fields()
-                    .u64(self.index_id_field.clone())
-                    .map(|ffr| ffr.get(addr.doc()));
-
-                opt_id.map(|id| (id, score))
-            })
-            .collect::<Vec<_>>();
-
-        let hits = ids_and_scores
-            .into_par_iter()
-            .map(|(id, score)| self.find(id).map(|opt_doc| opt_doc.map(|doc| Hit { doc, score })))
-            .filter_map(Result::transpose)
-            .collect::<err::Result<Vec<_>>>()?;
-
-        Ok(Results { count, hits })
+    pub fn search<I: search::Searcher<T>>(&self, searcher: I) -> Result<I::Item, I::Error> {
+        searcher.search(self)
     }
 
     /// Get all `Documents` from the datastore. Does not use the search index.
@@ -457,10 +337,10 @@ impl<T: DocumentLike> Store<T> {
         Ok(self
             .tree
             .iter()
-            .flat_map(|x| x)
+            .flatten()
             .map(|(k, v)| {
                 Ok(Document {
-                    id: u64::from_le_bytes(k.as_ref().try_into().map_err(err::Error::custom)?),
+                    id: u64::from_le_bytes(k.as_ref().try_into().map_err(err::custom)?),
                     inner: bincode::deserialize(&v)?,
                 })
             })
@@ -471,14 +351,14 @@ impl<T: DocumentLike> Store<T> {
     pub fn index_all(&self) -> err::Result<()> {
         let docs = self.all()?;
 
-        let mut index_writer = self.index_writer()?;
+        let mut index_writer = self.index.writer()?;
 
         for Document { id, inner } in docs {
-            let mut search_doc = inner.as_search_document(&self.index_fields)?;
+            let mut search_doc = inner.as_index_document(&self.index.fields)?;
 
-            search_doc.add_u64(self.index_id_field, id);
+            search_doc.add_u64(self.index.id_field, id);
 
-            index_writer.delete_term(tantivy::Term::from_field_u64(self.index_id_field, id));
+            index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, id));
 
             index_writer.add_document(search_doc);
         }
@@ -503,12 +383,11 @@ impl<T: DocumentLike> Store<T> {
 pub struct StoreBuilder<T> {
     db: Option<sled::Db>,
     marker: PhantomData<fn(T)>,
-    schema_builder: tantivy::schema::SchemaBuilder,
     index_dir: Option<PathBuf>,
     id_field_name: Option<String>,
     tree_name: Option<String>,
     index_writer_accessor:
-        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Sync>>,
+        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>>,
     index_configuration: Option<Box<dyn Fn(&mut tantivy::Index) -> tantivy::Result<()>>>,
 }
 
@@ -539,7 +418,7 @@ impl<T: DocumentLike> StoreBuilder<T> {
     /// By default will use `tantivy_index.writer(128_000_000)`.
     pub fn with_index_writer_accessor<F>(mut self, index_writer_accessor: F) -> Self
     where
-        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Sync + 'static,
+        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync + 'static,
     {
         self.index_writer_accessor = Some(Box::new(index_writer_accessor));
         self
@@ -548,7 +427,7 @@ impl<T: DocumentLike> StoreBuilder<T> {
     /// Custom configuration for the `tantivy::Index`.
     ///
     /// By default will use `tantivy_index.set_default_multithread_executor()?`.
-    pub fn with_index_configuration<F>(mut self, index_configuration: F) -> Self
+    pub fn with_index_config<F>(mut self, index_configuration: F) -> Self
     where
         F: Fn(&mut tantivy::Index) -> tantivy::Result<()> + 'static,
     {
@@ -557,56 +436,65 @@ impl<T: DocumentLike> StoreBuilder<T> {
     }
 
     /// Finish the builder and return the `Store`.
-    pub fn finish(mut self) -> err::Result<Store<T>> {
-        let db = self.db.ok_or_else(|| err::Error::custom("`db` not set"))?;
+    pub fn finish(self) -> err::Result<Store<T>> {
+        let db = self.db.ok_or_else(|| err::custom("`db` not set"))?;
 
-        let index_dir = self.index_dir.ok_or_else(|| err::Error::custom("`index_dir` not set"))?;
+        let index_dir = self.index_dir.ok_or_else(|| err::custom("`index_dir` not set"))?;
 
         let tree_name = self
             .tree_name
-            .or_else(|| T::tree_name())
-            .ok_or_else(|| err::Error::custom("`tree_name` not set"))?;
+            .or_else(T::tree_name)
+            .ok_or_else(|| err::custom("`tree_name` not set"))?;
 
         let tree = db.open_tree(tree_name.as_bytes())?;
 
-        let generate_id = Box::new(move || db.generate_id().map_err(err::Error::from));
+        let generate_id = Box::new(move || db.generate_id().map_err(err::Error::from));        
 
-        let index_fields = T::index_fields(&mut self.schema_builder)?;
+        let index = {
 
-        let index_id_field = match self.id_field_name.as_ref() {
-            Some(id_field_name) => self
-                .schema_builder
-                .add_u64_field(id_field_name, tantivy::schema::INDEXED | tantivy::schema::FAST),
-            None => self
-                .schema_builder
-                .add_u64_field("__id__", tantivy::schema::INDEXED | tantivy::schema::FAST),
+            let mut schema_builder = tantivy::schema::SchemaBuilder::default();
+
+            let fields = T::index_fields(&mut schema_builder)?;
+
+            let id_field = match self.id_field_name.as_ref() {
+                Some(id_field_name) => schema_builder
+                    .add_u64_field(id_field_name, tantivy::schema::INDEXED | tantivy::schema::FAST),
+                None => schema_builder
+                    .add_u64_field("__id__", tantivy::schema::INDEXED | tantivy::schema::FAST),
+            };
+
+            let schema = schema_builder.build();
+
+            let mmap_dir = tantivy::directory::MmapDirectory::open(&index_dir)
+                .map_err(tantivy::TantivyError::from)?;
+
+            let mut index = tantivy::Index::open_or_create(mmap_dir, schema)?;
+
+            if let Some(index_configuration) = self.index_configuration {
+                index_configuration(&mut index)?;
+            } else {
+                index.set_default_multithread_executor()?;
+            }
+
+            let writer_accessor =
+                self.index_writer_accessor.unwrap_or_else(|| Box::new(|idx| idx.writer(128_000_000)));
+
+            search::Index {
+                default_search_fields: T::default_search_fields(&fields),
+                inner: index,
+                id_field,
+                fields,
+                writer_accessor,
+            }
         };
-
-        let schema = self.schema_builder.build();
-
-        let mmap_dir = tantivy::directory::MmapDirectory::open(&index_dir)
-            .map_err(tantivy::TantivyError::from)?;
-
-        let mut index = tantivy::Index::open_or_create(mmap_dir, schema)?;
-
-        if let Some(index_configuration) = self.index_configuration {
-            index_configuration(&mut index)?;
-        } else {
-            index.set_default_multithread_executor()?;
-        }
-
-        let index_writer_accessor =
-            self.index_writer_accessor.unwrap_or_else(|| Box::new(|idx| idx.writer(128_000_000)));
 
         Ok(Store {
             tree,
             generate_id,
             marker: self.marker,
-            index_fields,
             index,
-            index_id_field,
-            index_writer_accessor,
         })
+        
     }
 }
 
@@ -616,8 +504,8 @@ impl<T: DocumentLike> StoreBuilder<T> {
 pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned + Send {
     /// The container for an index's fields.
     ///
-    /// Using `pallet_macros`, this is a wrapped `Vec<tantivy::schema::Field>`.
-    type IndexFieldsType: Sync;
+    /// When using `pallet_macros`, this is a wrapped `Vec<tantivy::schema::Field>`.
+    type IndexFieldsType;
 
     /// Given the specified fields container, return fields that should be used for the default search.
     fn default_search_fields(_index_fields: &Self::IndexFieldsType) -> Vec<tantivy::schema::Field> {
@@ -635,7 +523,7 @@ pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned + Send {
     ) -> err::Result<Self::IndexFieldsType>;
 
     /// Given the specified document and fields container, returns a `tantivy::Document`.
-    fn as_search_document(
+    fn as_index_document(
         &self,
         index_fields: &Self::IndexFieldsType,
     ) -> err::Result<tantivy::Document>;

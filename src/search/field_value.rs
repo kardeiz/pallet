@@ -12,7 +12,7 @@ impl FieldValue for String {
     type FieldOptionsType = tantivy::schema::TextOptions;
 
     fn default_field_options() -> Self::FieldOptionsType {
-        tantivy::schema::TEXT.into()
+        tantivy::schema::TEXT
     }
 
     fn field_entry<I: Into<String>, T: Into<Self::FieldOptionsType>>(
