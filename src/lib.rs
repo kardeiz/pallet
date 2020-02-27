@@ -501,7 +501,7 @@ impl<T: DocumentLike> StoreBuilder<T> {
 /// Defines methods for building the index schema and creating a `tantivy::Document`.
 ///
 /// `pallet_macros` provides a way to automatically derive this trait.
-pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned + Send {
+pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned {
     /// The container for an index's fields.
     ///
     /// When using `pallet_macros`, this is a wrapped `Vec<tantivy::schema::Field>`.
