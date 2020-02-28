@@ -17,10 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store = pallet::Store::<Book>::builder()
-        .with_db(db.clone())
-        .with_index_dir(temp_dir.path())
-        .finish()?;
+    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
 
     let books = vec![
         Book {

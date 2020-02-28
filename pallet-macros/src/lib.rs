@@ -54,12 +54,12 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
             _ => None,
         });
 
-    if l_attrs.clone().filter(|x| x.path() == &skip_indexing_path).next().is_some() {
+    if l_attrs.clone().any(|x| x.path() == &skip_indexing_path) {
         return Ok(None);
     }
 
     let is_default_search_field =
-        l_attrs.clone().filter(|x| x.path() == &default_search_field_path).next().is_some();
+        l_attrs.clone().any(|x| x.path() == &default_search_field_path);
 
     if let Some(index_field_name) = l_attrs
         .clone()
@@ -67,7 +67,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
             syn::Meta::NameValue(mnv) => Some(mnv),
             _ => None,
         })
-        .filter(|x| &x.path == &index_field_name_path)
+        .filter(|x| x.path == index_field_name_path)
         .filter_map(|x| match x.lit {
             syn::Lit::Str(s) => Some(s.value()),
             _ => None,
@@ -83,7 +83,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
             syn::Meta::NameValue(mnv) => Some(mnv),
             _ => None,
         })
-        .filter(|x| &x.path == &index_field_type_path)
+        .filter(|x| x.path == index_field_type_path)
         .filter_map(|x| match x.lit {
             syn::Lit::Str(s) => syn::parse_str(&s.value()).ok(),
             _ => None,
@@ -99,7 +99,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
             syn::Meta::NameValue(mnv) => Some(mnv),
             _ => None,
         })
-        .filter(|x| &x.path == &index_field_options_path)
+        .filter(|x| x.path == index_field_options_path)
         .filter_map(|x| match x.lit {
             syn::Lit::Str(s) => syn::parse_str::<syn::Expr>(&s.value()).ok(),
             _ => None,
@@ -114,7 +114,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
         ident: ident.clone(),
         name,
         ty,
-        opts: opts.into(),
+        opts,
         is_default_search_field,
     }))
 }
@@ -156,7 +156,7 @@ fn document_derive_inner(
             syn::Meta::NameValue(mnv) => Some(mnv),
             _ => None,
         })
-        .filter(|x| &x.path == &tree_name_path)
+        .filter(|x| x.path == tree_name_path)
         .filter_map(|x| match x.lit {
             syn::Lit::Str(s) => Some(s.value()),
             _ => None,
@@ -197,21 +197,24 @@ fn document_derive_inner(
 
             type IndexFieldsType = pallet::search::FieldsContainer;
 
-            fn default_search_fields(index_fields: &Self::IndexFieldsType) -> Vec<pallet::ext::tantivy::schema::Field> {
-                let fields = &index_fields.0;
-                vec![#(#default_search_fields,)*]
+            fn tree_builder() -> pallet::db::TreeBuilder {
+                let mut out = pallet::db::TreeBuilder::default();
+                if let std::option::Option::<std::string::String>::Some(tree_name) = #tree_name {
+                    out = out.with_tree_name(tree_name);
+                }
+                out
             }
 
-            fn tree_name() -> std::option::Option<std::string::String> {
-                #tree_name
-            }
-
-            fn index_fields(
-                schema_builder: &mut pallet::ext::tantivy::schema::SchemaBuilder,
-            ) -> pallet::err::Result<Self::IndexFieldsType> {
-                use pallet::search::FieldValue;
-
-                Ok(pallet::search::FieldsContainer(vec![#(#index_fields,)*]))
+            fn index_builder() -> pallet::search::IndexBuilder<Self::IndexFieldsType> {
+                let out = pallet::search::IndexBuilder::default()
+                    .with_fields_builder(|schema_builder| {
+                        Ok(pallet::search::FieldsContainer(vec![#(#index_fields,)*]))
+                    })
+                    .with_default_search_fields_builder(|fields| {
+                        let fields = &fields.0;
+                        vec![#(#default_search_fields,)*]
+                    });
+                out
             }
 
             fn as_index_document(
@@ -229,8 +232,6 @@ fn document_derive_inner(
             }
         }
     };
-
-    // panic!("{}", &out);
 
     Ok(out.into())
 }

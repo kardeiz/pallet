@@ -14,7 +14,8 @@ The included `pallet_macros` crate provides an easy way to derive `pallet::Docum
 ## Usage
 
 ```rust
-#[macro_use] extern crate serde;
+#[macro_use]
+extern crate serde;
 
 #[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
@@ -32,10 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store = pallet::Store::<Book>::builder()
-        .with_db(db.clone())
-        .with_index_dir(temp_dir.path())
-        .finish()?;
+    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
 
     let books = vec![
         Book {
@@ -79,6 +77,12 @@ See the example for usage. The following attributes can be used to customize the
 
 ## Changelog
 
+### 0.4.0
+
+* Add various builders.
+* Split out `index` and `tree` functionality.
+* Set up `search::Searcher` trait and other search helpers.
+
 ### 0.3.2
 
 * Add some docs
@@ -90,6 +94,6 @@ See the example for usage. The following attributes can be used to customize the
 
 <hr/>
 
-Current version: 0.3.2
+Current version: 0.4.0
 
 License: MIT

@@ -10,7 +10,8 @@ The included `pallet_macros` crate provides an easy way to derive `pallet::Docum
 # Usage
 
 ```rust,no_run
-#[macro_use] extern crate serde;
+#[macro_use]
+extern crate serde;
 
 #[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
@@ -28,10 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = sled::open(temp_dir.path().join("db"))?;
 
-    let store = pallet::Store::<Book>::builder()
-        .with_db(db.clone())
-        .with_index_dir(temp_dir.path())
-        .finish()?;
+    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
 
     let books = vec![
         Book {
@@ -75,6 +73,12 @@ See the example for usage. The following attributes can be used to customize the
 
 # Changelog
 
+## 0.4.0
+
+* Add various builders.
+* Split out `index` and `tree` functionality.
+* Set up `search::Searcher` trait and other search helpers.
+
 ## 0.3.2
 
 * Add some docs
@@ -85,7 +89,6 @@ See the example for usage. The following attributes can be used to customize the
 
 */
 
-use std::convert::Into;
 use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::path::PathBuf;
@@ -105,10 +108,8 @@ pub mod err {
     /// Error container
     #[derive(thiserror::Error, Debug)]
     pub enum Error {
-        #[error("Search engine error: `{0}`")]
+        #[error("Search error: `{0}`")]
         Tantivy(tantivy::TantivyError),
-        #[error("Search query error: `{0}`")]
-        TantivyQueryParser(tantivy::query::QueryParserError),
         #[error("Database error: `{0}`")]
         Sled(#[from] sled::Error),
         #[error("De/serialization error: `{0}`")]
@@ -125,7 +126,7 @@ pub mod err {
 
     impl From<tantivy::query::QueryParserError> for Error {
         fn from(t: tantivy::query::QueryParserError) -> Self {
-            Error::TantivyQueryParser(t)
+            Error::Tantivy(t.into())
         }
     }
 
@@ -146,6 +147,9 @@ pub mod err {
     pub type Result<T> = std::result::Result<T, Error>;
 }
 
+/// Items related to `sled` and data storage
+pub mod db;
+
 /// Items relating to `tantivy` and searching
 pub mod search;
 
@@ -158,28 +162,15 @@ pub struct Document<T> {
 
 /// The document store, contains the `sled::Tree` and `tantivy::Index`.
 pub struct Store<T: DocumentLike> {
-    generate_id: Box<dyn Fn() -> err::Result<u64> + Send + Sync>,
-    tree: sled::Tree,
+    tree: db::Tree,
     marker: PhantomData<fn(T)>,
     pub index: search::Index<T::IndexFieldsType>,
 }
 
 impl<T: DocumentLike> Store<T> {
-    fn generate_id(&self) -> err::Result<u64> {
-        (self.generate_id)()
-    }
-
-    /// Builder for a new `Store`
+    /// Create a new builder
     pub fn builder() -> StoreBuilder<T> {
-        StoreBuilder {
-            db: None,
-            marker: PhantomData,
-            index_dir: None,
-            id_field_name: None,
-            tree_name: None,
-            index_writer_accessor: None,
-            index_configuration: None,
-        }
+        StoreBuilder::default()
     }
 
     /// Create a new `Document`, returns the persisted document's `id`.
@@ -189,7 +180,8 @@ impl<T: DocumentLike> Store<T> {
                 let mut index_writer =
                     self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
-                let id = self.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
+                let id =
+                    self.tree.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let serialized_inner = bincode::serialize(inner)
                     .map_err(err::Error::Bincode)
@@ -227,8 +219,10 @@ impl<T: DocumentLike> Store<T> {
                     self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 for inner in inners {
-                    let id =
-                        self.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
+                    let id = self
+                        .tree
+                        .generate_id()
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let serialized_inner = bincode::serialize(inner)
                         .map_err(err::Error::Bincode)
@@ -379,122 +373,54 @@ impl<T: DocumentLike> Store<T> {
     }
 }
 
-/// The `Store` builder struct
-pub struct StoreBuilder<T> {
-    db: Option<sled::Db>,
+pub struct StoreBuilder<T: DocumentLike> {
+    tree_builder: db::TreeBuilder,
+    index_builder: search::IndexBuilder<T::IndexFieldsType>,
     marker: PhantomData<fn(T)>,
-    index_dir: Option<PathBuf>,
-    id_field_name: Option<String>,
-    tree_name: Option<String>,
-    index_writer_accessor:
-        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>>,
-    index_configuration: Option<Box<dyn Fn(&mut tantivy::Index) -> tantivy::Result<()>>>,
+}
+
+impl<T: DocumentLike> Default for StoreBuilder<T> {
+    fn default() -> Self {
+        StoreBuilder {
+            tree_builder: db::TreeBuilder::default(),
+            index_builder: search::IndexBuilder::default(),
+            marker: PhantomData,
+        }
+    }
 }
 
 impl<T: DocumentLike> StoreBuilder<T> {
-    /// Use the given `sled::Db` for this `Store`.
+    /// Shortcut method to set the `sled::Db` for the `tree_builder`
     pub fn with_db(mut self, db: sled::Db) -> Self {
-        self.db = Some(db);
+        self.tree_builder = self.tree_builder.with_db(db);
         self
     }
 
-    /// Use the given directory (must exist) for the `tantivy::Index`.
+    /// Shortcut method to set the index dir for the `index_builder`
     pub fn with_index_dir<I: Into<PathBuf>>(mut self, index_dir: I) -> Self {
-        self.index_dir = Some(index_dir.into());
+        self.index_builder = self.index_builder.with_index_dir(index_dir);
         self
     }
 
-    /// Use the given name for the internal `sled::Tree`.
-    ///
-    /// This can be provided alternatively by implementing `DocumentLike::tree_name`
-    /// for your document type.
-    pub fn with_tree_name<I: Into<String>>(mut self, tree_name: I) -> Self {
-        self.tree_name = Some(tree_name.into());
+    pub fn with_tree_builder(mut self, tree_builder: db::TreeBuilder) -> Self {
+        self.tree_builder = tree_builder;
         self
     }
 
-    /// Define a custom way to get the `tantivy::IndexWriter`.
-    ///
-    /// By default will use `tantivy_index.writer(128_000_000)`.
-    pub fn with_index_writer_accessor<F>(mut self, index_writer_accessor: F) -> Self
-    where
-        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync + 'static,
-    {
-        self.index_writer_accessor = Some(Box::new(index_writer_accessor));
+    pub fn with_index_builder(
+        mut self,
+        index_builder: search::IndexBuilder<T::IndexFieldsType>,
+    ) -> Self {
+        self.index_builder = index_builder;
         self
     }
 
-    /// Custom configuration for the `tantivy::Index`.
-    ///
-    /// By default will use `tantivy_index.set_default_multithread_executor()?`.
-    pub fn with_index_config<F>(mut self, index_configuration: F) -> Self
-    where
-        F: Fn(&mut tantivy::Index) -> tantivy::Result<()> + 'static,
-    {
-        self.index_configuration = Some(Box::new(index_configuration));
-        self
-    }
-
-    /// Finish the builder and return the `Store`.
     pub fn finish(self) -> err::Result<Store<T>> {
-        let db = self.db.ok_or_else(|| err::custom("`db` not set"))?;
+        let tree = self.tree_builder.merge(T::tree_builder()).finish()?;
 
-        let index_dir = self.index_dir.ok_or_else(|| err::custom("`index_dir` not set"))?;
+        let index = self.index_builder.merge(T::index_builder()).finish()?;
 
-        let tree_name = self
-            .tree_name
-            .or_else(T::tree_name)
-            .ok_or_else(|| err::custom("`tree_name` not set"))?;
-
-        let tree = db.open_tree(tree_name.as_bytes())?;
-
-        let generate_id = Box::new(move || db.generate_id().map_err(err::Error::from));        
-
-        let index = {
-
-            let mut schema_builder = tantivy::schema::SchemaBuilder::default();
-
-            let fields = T::index_fields(&mut schema_builder)?;
-
-            let id_field = match self.id_field_name.as_ref() {
-                Some(id_field_name) => schema_builder
-                    .add_u64_field(id_field_name, tantivy::schema::INDEXED | tantivy::schema::FAST),
-                None => schema_builder
-                    .add_u64_field("__id__", tantivy::schema::INDEXED | tantivy::schema::FAST),
-            };
-
-            let schema = schema_builder.build();
-
-            let mmap_dir = tantivy::directory::MmapDirectory::open(&index_dir)
-                .map_err(tantivy::TantivyError::from)?;
-
-            let mut index = tantivy::Index::open_or_create(mmap_dir, schema)?;
-
-            if let Some(index_configuration) = self.index_configuration {
-                index_configuration(&mut index)?;
-            } else {
-                index.set_default_multithread_executor()?;
-            }
-
-            let writer_accessor =
-                self.index_writer_accessor.unwrap_or_else(|| Box::new(|idx| idx.writer(128_000_000)));
-
-            search::Index {
-                default_search_fields: T::default_search_fields(&fields),
-                inner: index,
-                id_field,
-                fields,
-                writer_accessor,
-            }
-        };
-
-        Ok(Store {
-            tree,
-            generate_id,
-            marker: self.marker,
-            index,
-        })
-        
+        Ok(Store { tree, index, marker: PhantomData })
     }
 }
 
@@ -507,24 +433,16 @@ pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned {
     /// When using `pallet_macros`, this is a wrapped `Vec<tantivy::schema::Field>`.
     type IndexFieldsType;
 
-    /// Given the specified fields container, return fields that should be used for the default search.
-    fn default_search_fields(_index_fields: &Self::IndexFieldsType) -> Vec<tantivy::schema::Field> {
-        Vec::new()
-    }
-
-    /// Alternative way to set the `sled::Tree` name.
-    fn tree_name() -> Option<String> {
-        None
-    }
-
-    /// Adds all fields to the given `tantivy::schema::SchemaBuilder` and returns the fields container.
-    fn index_fields(
-        schema_builder: &mut tantivy::schema::SchemaBuilder,
-    ) -> err::Result<Self::IndexFieldsType>;
-
     /// Given the specified document and fields container, returns a `tantivy::Document`.
     fn as_index_document(
         &self,
         index_fields: &Self::IndexFieldsType,
     ) -> err::Result<tantivy::Document>;
+
+    fn tree_builder() -> db::TreeBuilder {
+        db::TreeBuilder::default()
+    }
+    fn index_builder() -> search::IndexBuilder<Self::IndexFieldsType> {
+        search::IndexBuilder::default()
+    }
 }
