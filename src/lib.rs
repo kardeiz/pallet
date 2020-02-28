@@ -372,6 +372,7 @@ impl<T: DocumentLike> Store<T> {
     }
 }
 
+/// Builder for `Store`
 pub struct StoreBuilder<T: DocumentLike> {
     tree_builder: db::TreeBuilder,
     index_builder: search::IndexBuilder<T::IndexFieldsType>,
@@ -401,11 +402,13 @@ impl<T: DocumentLike> StoreBuilder<T> {
         self
     }
 
+    /// Set the `tree_builder` to be used.
     pub fn with_tree_builder(mut self, tree_builder: db::TreeBuilder) -> Self {
         self.tree_builder = tree_builder;
         self
     }
 
+    /// Set the `index_builder` to be used.
     pub fn with_index_builder(
         mut self,
         index_builder: search::IndexBuilder<T::IndexFieldsType>,
@@ -414,6 +417,7 @@ impl<T: DocumentLike> StoreBuilder<T> {
         self
     }
 
+    /// Convert into finished `Store`
     pub fn finish(self) -> err::Result<Store<T>> {
         let tree = self.tree_builder.merge(T::tree_builder()).finish()?;
 
@@ -438,9 +442,16 @@ pub trait DocumentLike: serde::Serialize + serde::de::DeserializeOwned {
         index_fields: &Self::IndexFieldsType,
     ) -> err::Result<tantivy::Document>;
 
+    /// Can be provided to set some or all of the `Tree` config.
+    ///
+    /// Will be merged with any configuration provided in `StoreBuilder::tree_builder`
     fn tree_builder() -> db::TreeBuilder {
         db::TreeBuilder::default()
     }
+
+    /// Can be provided to set some or all of the `Index` config.
+    ///
+    /// Will be merged with any configuration provided in `StoreBuilder::index_builder`
     fn index_builder() -> search::IndexBuilder<Self::IndexFieldsType> {
         search::IndexBuilder::default()
     }
