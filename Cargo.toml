@@ -7,11 +7,12 @@ license = "MIT"
 description = "Document store built with sled and tantivy"
 readme = "README.md"
 repository = "https://github.com/kardeiz/pallet"
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+keywords = ["database", "datastore", "search", "full-text", "tantivy", "sled", ]
+categories = ["database-implementations", "data-structures"]
 
 [dependencies]
 tantivy = "0.12"
-sled = "0.30"
+sled = { version = "0.31", path = "../sled-alt" }
 bincode = "1.2.1"
 serde = { version = "1.0.104", features = ["derive"] }
 thiserror = "1.0.10"
