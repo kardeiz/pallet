@@ -3,7 +3,6 @@
 [![Docs](https://docs.rs/pallet/badge.svg)](https://docs.rs/crate/pallet/)
 [![Crates.io](https://img.shields.io/crates/v/pallet.svg)](https://crates.io/crates/pallet)
 
-
 A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
 
 Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),

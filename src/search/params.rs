@@ -15,22 +15,29 @@ Builder to prepare search execution
 
 ## Usage:
 
-```rust,ignore
-let search_params = Params::default()
-    .with_query("my search terms here")
-    .with_collector((tantivy::collector::Count, scored_ids_handle))
-    .with_handler(|(count, scored_ids)| {
-        let hits = scored_ids
-            .into_par_iter()
-            .map(|ScoredId { id, score }| {
-                store.find(id).map(|opt_doc| opt_doc.map(|doc| Hit { doc, score }))
-            })
-            .filter_map(Result::transpose)
-            .collect::<err::Result<Vec<_>>>()?;
+```rust
+use pallet::{err, search, Store, DocumentLike};
 
-        Ok(Results { count, hits })
-    });
-Ok(search_params.search(store)?)
+fn search<T: DocumentLike>(store: &Store<T>, query: &str) -> err::Result<search::Results<T>> {
+    let scored_ids_handle = search::ScoredIds { size_hint: None, id_field: store.index.id_field };
+    let count_handle = tantivy::collector::Count;
+
+    let search_params = search::Params::default()
+        .with_query(query)
+        .with_collector((count_handle, scored_ids_handle))
+        .with_handler(|(count, scored_ids)| -> err::Result<_> {
+            let hits = scored_ids
+                .into_iter()
+                .map(|search::ScoredId { id, score }| {
+                    store.find(id).map(|opt_doc| opt_doc.map(|doc| search::Hit { doc, score }))
+                })
+                .filter_map(Result::transpose)
+                .collect::<err::Result<Vec<_>>>()?;
+
+            Ok(search::Results { count, hits })
+        });
+    Ok(store.search(search_params)?)
+}
 ```
 */
 pub struct Params<Q, C, H> {

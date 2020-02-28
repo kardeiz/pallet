@@ -1,5 +1,4 @@
 /*!
-
 A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
 
 Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
@@ -9,7 +8,7 @@ The included `pallet_macros` crate provides an easy way to derive `pallet::Docum
 
 # Usage
 
-```rust,no_run
+```rust
 #[macro_use]
 extern crate serde;
 
