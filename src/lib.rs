@@ -72,6 +72,11 @@ See the example for usage. The following attributes can be used to customize the
 
 # Changelog
 
+## 0.5.0
+
+* Add `Deref` to inner type on `Document`
+* Make index writer persistent
+
 ## 0.4.0
 
 * Add various builders.
@@ -159,6 +164,21 @@ pub struct Document<T> {
     pub inner: T,
 }
 
+impl<T> std::ops::Deref for Document<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> std::ops::DerefMut for Document<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+
 /// The document store, contains the `sled::Tree` and `tantivy::Index`.
 pub struct Store<T: DocumentLike> {
     tree: db::Tree,
@@ -177,7 +197,7 @@ impl<T: DocumentLike> Store<T> {
         let id = self.tree.transaction(
             |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
                 let mut index_writer =
-                    self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                    self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let id =
                     self.tree.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
@@ -215,7 +235,7 @@ impl<T: DocumentLike> Store<T> {
                 let mut out = Vec::with_capacity(inners.len());
 
                 let mut index_writer =
-                    self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                    self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
 
                 for inner in inners {
                     let id = self
@@ -261,7 +281,7 @@ impl<T: DocumentLike> Store<T> {
     pub fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
-                self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
 
             for Document { id, inner } in docs {
                 let serialized_inner = bincode::serialize(inner)
@@ -301,7 +321,7 @@ impl<T: DocumentLike> Store<T> {
     pub fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
-                self.index.writer().map_err(sled::ConflictableTransactionError::Abort)?;
+                self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
 
             for id in ids {
                 index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
@@ -344,7 +364,7 @@ impl<T: DocumentLike> Store<T> {
     pub fn index_all(&self) -> err::Result<()> {
         let docs = self.all()?;
 
-        let mut index_writer = self.index.writer()?;
+        let mut index_writer = self.index.writer.lock().map_err(err::custom)?;
 
         for Document { id, inner } in docs {
             let mut search_doc = inner.as_index_document(&self.index.fields)?;

@@ -13,11 +13,14 @@ pub struct Book {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+
     let temp_dir = tempfile::TempDir::new_in(".")?;
 
-    let db = sled::open(temp_dir.path().join("db"))?;
+    let temp_dir_path = temp_dir.path();
 
-    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
+    let db = sled::open(temp_dir_path.join("db"))?;
+
+    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir_path).finish()?;
 
     let books = vec![
         Book {
@@ -34,6 +37,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title: "The Great Gatsby".into(),
             description: Some("About a man and some other stuff".into()),
             rating: 8,
+        },
+        Book {
+            title: "Cabin in the Woods".into(),
+            description: None,
+            rating: 9,
         },
     ];
 

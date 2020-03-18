@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-
+use std::sync::Mutex;
 use crate::{err, Document, DocumentLike, Store};
 
 mod as_query;
@@ -25,8 +25,7 @@ pub struct Index<T> {
     pub fields: T,
     default_search_fields: Vec<tantivy::schema::Field>,
     inner: tantivy::Index,
-    writer_accessor:
-        Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>,
+    pub(crate) writer: Mutex<tantivy::IndexWriter>,
 }
 
 impl<T> Index<T> {
@@ -34,12 +33,6 @@ impl<T> Index<T> {
     pub fn builder() -> IndexBuilder<T> {
         IndexBuilder::default()
     }
-
-    /// Get a `tantivy::IndexWriter` from the stored `tantivy::Index`.
-    pub fn writer(&self) -> err::Result<tantivy::IndexWriter> {
-        Ok((self.writer_accessor)(&self.inner)?)
-    }
-
     /// Get the query parser associated with index and default search fields.
     pub fn query_parser(&self) -> tantivy::query::QueryParser {
         tantivy::query::QueryParser::for_index(&self.inner, self.default_search_fields.clone())
@@ -51,7 +44,7 @@ pub struct IndexBuilder<T> {
     fields_builder: Option<Box<dyn Fn(&mut tantivy::schema::SchemaBuilder) -> err::Result<T>>>,
     default_search_fields_builder: Option<Box<dyn Fn(&T) -> Vec<tantivy::schema::Field>>>,
     writer_accessor:
-        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>>,
+        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter>>>,
     index_dir: Option<PathBuf>,
     config: Option<Box<dyn Fn(&mut tantivy::Index) -> tantivy::Result<()>>>,
     id_field_name: Option<String>,
@@ -111,7 +104,7 @@ impl<T> IndexBuilder<T> {
     /// By default will use `tantivy_index.writer(128_000_000)`.
     pub fn with_writer_accessor<F>(mut self, writer_accessor: F) -> Self
     where
-        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync + 'static,
+        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + 'static,
     {
         self.writer_accessor = Some(Box::new(writer_accessor));
         self
@@ -195,7 +188,16 @@ impl<T> IndexBuilder<T> {
                 Vec::new()
             };
 
-        Ok(Index { default_search_fields, inner: index, id_field, fields, writer_accessor })
+        let writer = writer_accessor(&index)?;
+
+        Ok(Index { 
+            default_search_fields, 
+            inner: index, 
+            id_field, 
+            fields, 
+            // writer_accessor,
+            writer: Mutex::new(writer)
+        })
     }
 }
 
