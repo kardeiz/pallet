@@ -76,6 +76,11 @@ See the example for usage. The following attributes can be used to customize the
 
 ## Changelog
 
+### 0.5.0
+
+* Add `Deref` to inner type on `Document`
+* Make index writer persistent
+
 ### 0.4.0
 
 * Add various builders.
@@ -93,6 +98,6 @@ See the example for usage. The following attributes can be used to customize the
 
 <hr/>
 
-Current version: 0.4.0
+Current version: 0.5.1
 
 License: MIT
