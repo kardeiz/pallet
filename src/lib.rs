@@ -184,7 +184,6 @@ impl<T> std::ops::DerefMut for Document<T> {
     }
 }
 
-
 /// The document store, contains the `sled::Tree` and `tantivy::Index`.
 pub struct Store<T: DocumentLike> {
     tree: db::Tree,
@@ -203,8 +202,10 @@ impl<T: DocumentLike> Store<T> {
         let id = self.tree.transaction(
             |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
                 self.index.with_writer(|index_writer| {
-                    let id =
-                        self.tree.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
+                    let id = self
+                        .tree
+                        .generate_id()
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let serialized_inner = bincode::serialize(inner)
                         .map_err(err::Error::Bincode)
@@ -226,7 +227,7 @@ impl<T: DocumentLike> Store<T> {
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     Ok(id)
-                })                
+                })
             },
         )?;
 
@@ -268,7 +269,7 @@ impl<T: DocumentLike> Store<T> {
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     Ok(out)
-                })                
+                })
             },
         )?;
 
@@ -295,7 +296,8 @@ impl<T: DocumentLike> Store<T> {
 
                     search_doc.add_u64(self.index.id_field, *id);
 
-                    index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+                    index_writer
+                        .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
 
                     index_writer.add_document(search_doc);
 
@@ -324,7 +326,8 @@ impl<T: DocumentLike> Store<T> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             self.index.with_writer(|index_writer| {
                 for id in ids {
-                    index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+                    index_writer
+                        .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
 
                     tree.remove(&id.to_le_bytes())?;
                 }
@@ -362,7 +365,7 @@ impl<T: DocumentLike> Store<T> {
     }
 
     /// Index (or re-index) all `Documents` in the datastore.
-    pub fn index_all(&self) -> err::Result<()> {        
+    pub fn index_all(&self) -> err::Result<()> {
         self.index.with_writer(|index_writer| {
             let docs = self.all()?;
             for Document { id, inner } in docs {
@@ -393,8 +396,10 @@ impl<T: DocumentLike> Store<T> {
 
     /// Delete all `Document`s
     pub fn delete_all(&self) -> err::Result<()> {
-
-        let keys = self.tree.iter().keys()
+        let keys = self
+            .tree
+            .iter()
+            .keys()
             .map(|x| x.map_err(err::Error::from))
             .collect::<err::Result<Vec<_>>>()?;
 
@@ -403,7 +408,8 @@ impl<T: DocumentLike> Store<T> {
                 tree.remove(key)?;
             }
             self.index.with_writer(|index_writer| {
-                index_writer.delete_all_documents()
+                index_writer
+                    .delete_all_documents()
                     .map_err(err::Error::Tantivy)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 

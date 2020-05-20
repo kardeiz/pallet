@@ -1,6 +1,6 @@
+use crate::{err, Document, DocumentLike, Store};
 use std::path::PathBuf;
 use std::sync::Mutex;
-use crate::{err, Document, DocumentLike, Store};
 
 mod as_query;
 mod field_value;
@@ -26,7 +26,8 @@ pub struct Index<T> {
     default_search_fields: Vec<tantivy::schema::Field>,
     inner: tantivy::Index,
     pub(crate) writer: Mutex<Option<tantivy::IndexWriter>>,
-    writer_accessor: Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>,
+    writer_accessor:
+        Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>,
 }
 
 impl<T> Index<T> {
@@ -40,14 +41,17 @@ impl<T> Index<T> {
     }
 
     pub(crate) fn with_writer<F, S, E>(&self, cls: F) -> Result<S, E>
-        where F: Fn(&mut tantivy::IndexWriter) -> Result<S, E>,
-        E: From<err::Error> {
-
+    where
+        F: Fn(&mut tantivy::IndexWriter) -> Result<S, E>,
+        E: From<err::Error>,
+    {
         let mut lock = self.writer.lock().map_err(err::custom).map_err(E::from)?;
 
         let mut writer = match lock.take() {
             Some(writer) => writer,
-            None => (self.writer_accessor)(&self.inner).map_err(err::Error::Tantivy).map_err(E::from)?
+            None => {
+                (self.writer_accessor)(&self.inner).map_err(err::Error::Tantivy).map_err(E::from)?
+            }
         };
 
         let out = cls(&mut writer)?;
@@ -56,7 +60,6 @@ impl<T> Index<T> {
 
         Ok(out)
     }
-
 }
 
 /// Builder for an `Index`
@@ -210,13 +213,13 @@ impl<T> IndexBuilder<T> {
 
         // let writer = writer_accessor(&index)?;
 
-        Ok(Index { 
-            default_search_fields, 
-            inner: index, 
-            id_field, 
-            fields, 
+        Ok(Index {
+            default_search_fields,
+            inner: index,
+            id_field,
+            fields,
             writer_accessor,
-            writer: Mutex::new(None)
+            writer: Mutex::new(None),
         })
     }
 }
