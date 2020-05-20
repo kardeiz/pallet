@@ -12,7 +12,7 @@ categories = ["database-implementations", "data-structures"]
 
 [dependencies]
 tantivy = "0.12"
-sled = { version = "0.31", path = "../sled" }
+sled = { version = "0.31" }
 bincode = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
