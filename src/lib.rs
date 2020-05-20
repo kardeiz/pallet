@@ -413,6 +413,11 @@ impl<T: DocumentLike> Store<T> {
                     .map_err(err::Error::Tantivy)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
+                index_writer
+                    .commit()
+                    .map_err(err::Error::Tantivy)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
                 Ok(())
             })
         })?;
