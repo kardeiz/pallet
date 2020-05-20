@@ -25,7 +25,8 @@ pub struct Index<T> {
     pub fields: T,
     default_search_fields: Vec<tantivy::schema::Field>,
     inner: tantivy::Index,
-    pub(crate) writer: Mutex<tantivy::IndexWriter>,
+    pub(crate) writer: Mutex<Option<tantivy::IndexWriter>>,
+    writer_accessor: Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>,
 }
 
 impl<T> Index<T> {
@@ -37,6 +38,25 @@ impl<T> Index<T> {
     pub fn query_parser(&self) -> tantivy::query::QueryParser {
         tantivy::query::QueryParser::for_index(&self.inner, self.default_search_fields.clone())
     }
+
+    pub(crate) fn with_writer<F, S, E>(&self, cls: F) -> Result<S, E>
+        where F: Fn(&mut tantivy::IndexWriter) -> Result<S, E>,
+        E: From<err::Error> {
+
+        let mut lock = self.writer.lock().map_err(err::custom).map_err(E::from)?;
+
+        let mut writer = match lock.take() {
+            Some(writer) => writer,
+            None => (self.writer_accessor)(&self.inner).map_err(err::Error::Tantivy).map_err(E::from)?
+        };
+
+        let out = cls(&mut writer)?;
+
+        *lock = Some(writer);
+
+        Ok(out)
+    }
+
 }
 
 /// Builder for an `Index`
@@ -44,7 +64,7 @@ pub struct IndexBuilder<T> {
     fields_builder: Option<Box<dyn Fn(&mut tantivy::schema::SchemaBuilder) -> err::Result<T>>>,
     default_search_fields_builder: Option<Box<dyn Fn(&T) -> Vec<tantivy::schema::Field>>>,
     writer_accessor:
-        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter>>>,
+        Option<Box<dyn Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync>>,
     index_dir: Option<PathBuf>,
     config: Option<Box<dyn Fn(&mut tantivy::Index) -> tantivy::Result<()>>>,
     id_field_name: Option<String>,
@@ -104,7 +124,7 @@ impl<T> IndexBuilder<T> {
     /// By default will use `tantivy_index.writer(128_000_000)`.
     pub fn with_writer_accessor<F>(mut self, writer_accessor: F) -> Self
     where
-        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + 'static,
+        F: Fn(&tantivy::Index) -> tantivy::Result<tantivy::IndexWriter> + Send + Sync + 'static,
     {
         self.writer_accessor = Some(Box::new(writer_accessor));
         self
@@ -188,15 +208,15 @@ impl<T> IndexBuilder<T> {
                 Vec::new()
             };
 
-        let writer = writer_accessor(&index)?;
+        // let writer = writer_accessor(&index)?;
 
         Ok(Index { 
             default_search_fields, 
             inner: index, 
             id_field, 
             fields, 
-            // writer_accessor,
-            writer: Mutex::new(writer)
+            writer_accessor,
+            writer: Mutex::new(None)
         })
     }
 }
