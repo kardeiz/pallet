@@ -106,6 +106,44 @@ pub mod ext {
     pub use tantivy;
 }
 
+#[cfg(feature = "bincode")]
+mod serialize {
+    pub fn serialize<T: ?Sized>(value: &T) -> crate::err::Result<Vec<u8>>
+    where
+        T: serde::Serialize,
+    {
+        bincode::serialize(value)
+            .map_err(crate::err::Error::Bincode)
+    }
+
+    pub fn deserialize<'a, T>(bytes: &'a [u8]) -> crate::err::Result<T>
+    where
+        T: serde::de::Deserialize<'a>,
+    {
+        bincode::deserialize(bytes)
+            .map_err(crate::err::Error::Bincode)
+    }
+}
+
+#[cfg(feature = "serde_cbor")]
+mod serialize {
+    pub fn serialize<T: Sized>(value: &T) -> crate::err::Result<Vec<u8>>
+        where
+            T: serde::Serialize,
+    {
+        serde_cbor::to_vec(value)
+            .map_err(crate::err::Error::CBOR)
+    }
+
+    pub fn deserialize<'a, T>(bytes: &'a [u8]) -> crate::err::Result<T>
+        where
+            T: serde::Deserialize<'a>,
+    {
+        serde_cbor::from_slice(bytes)
+            .map_err(crate::err::Error::CBOR)
+    }
+}
+
 /// Error management
 pub mod err {
 
@@ -116,8 +154,12 @@ pub mod err {
         Tantivy(tantivy::TantivyError),
         #[error("Database error: `{0}`")]
         Sled(#[from] sled::Error),
+        #[cfg(feature = "bincode")]
         #[error("De/serialization error: `{0}`")]
         Bincode(#[from] bincode::Error),
+        #[cfg(feature = "serde_cbor")]
+        #[error("De/serialization error: `{0}`")]
+        CBOR(#[from] serde_cbor::Error),
         #[error("Error: {0}")]
         Custom(Box<str>),
     }
@@ -207,8 +249,7 @@ impl<T: DocumentLike> Store<T> {
                         .generate_id()
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                    let serialized_inner = bincode::serialize(inner)
-                        .map_err(err::Error::Bincode)
+                    let serialized_inner = crate::serialize::serialize(inner)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let mut search_doc = inner
@@ -246,9 +287,8 @@ impl<T: DocumentLike> Store<T> {
                             .generate_id()
                             .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                        let serialized_inner = bincode::serialize(inner)
-                            .map_err(err::Error::Bincode)
-                            .map_err(sled::ConflictableTransactionError::Abort)?;
+                    let serialized_inner = crate::serialize::serialize(inner)
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
 
                         let mut search_doc = inner
                             .as_index_document(&self.index.fields)
@@ -286,8 +326,7 @@ impl<T: DocumentLike> Store<T> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             self.index.with_writer(|index_writer| {
                 for Document { id, inner } in docs {
-                    let serialized_inner = bincode::serialize(inner)
-                        .map_err(err::Error::Bincode)
+                    let serialized_inner = crate::serialize::serialize(inner)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     let mut search_doc = inner
@@ -358,7 +397,7 @@ impl<T: DocumentLike> Store<T> {
             .map(|(k, v)| {
                 Ok(Document {
                     id: u64::from_le_bytes(k.as_ref().try_into().map_err(err::custom)?),
-                    inner: bincode::deserialize(&v)?,
+                    inner: crate::serialize::deserialize(&v)?,
                 })
             })
             .collect::<err::Result<Vec<_>>>()?)
@@ -389,7 +428,7 @@ impl<T: DocumentLike> Store<T> {
         Ok(self
             .tree
             .get(id.to_le_bytes())?
-            .map(|bytes| bincode::deserialize(&bytes))
+            .map(|bytes| crate::serialize::deserialize(&bytes))
             .transpose()?
             .map(|inner| Document { id, inner }))
     }

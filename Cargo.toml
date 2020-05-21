@@ -12,13 +12,17 @@ categories = ["database-implementations", "data-structures"]
 
 [dependencies]
 tantivy = "0.12"
-sled = { version = "0.31" }
-bincode = "1"
+sled = { version = "0.31"}
+bincode = { version =  "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 rayon = "1"
 pallet-macros = { path = "./pallet-macros", version = "0.4" }
 tempfile = "3.1"
+serde_cbor ={ version =  "0.11.1", optional = true }
+
+[features]
+default = ["bincode"]
 
 [patch.crates-io]
 sled = { git = 'https://github.com/kardeiz/sled', branch = 'wsl-fix' }
