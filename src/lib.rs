@@ -72,6 +72,10 @@ See the example for usage. The following attributes can be used to customize the
 
 # Changelog
 
+## 0.6.0
+
+* Add `serde-cbor` serialization support (thanks @minioin)
+
 ## 0.5.0
 
 * Add `Deref` to inner type on `Document`
@@ -112,35 +116,31 @@ mod serialize {
     where
         T: serde::Serialize,
     {
-        bincode::serialize(value)
-            .map_err(crate::err::Error::Bincode)
+        bincode::serialize(value).map_err(crate::err::Error::Bincode)
     }
 
     pub fn deserialize<'a, T>(bytes: &'a [u8]) -> crate::err::Result<T>
     where
         T: serde::de::Deserialize<'a>,
     {
-        bincode::deserialize(bytes)
-            .map_err(crate::err::Error::Bincode)
+        bincode::deserialize(bytes).map_err(crate::err::Error::Bincode)
     }
 }
 
 #[cfg(feature = "serde_cbor")]
 mod serialize {
     pub fn serialize<T: Sized>(value: &T) -> crate::err::Result<Vec<u8>>
-        where
-            T: serde::Serialize,
+    where
+        T: serde::Serialize,
     {
-        serde_cbor::to_vec(value)
-            .map_err(crate::err::Error::CBOR)
+        serde_cbor::to_vec(value).map_err(crate::err::Error::CBOR)
     }
 
     pub fn deserialize<'a, T>(bytes: &'a [u8]) -> crate::err::Result<T>
-        where
-            T: serde::Deserialize<'a>,
+    where
+        T: serde::Deserialize<'a>,
     {
-        serde_cbor::from_slice(bytes)
-            .map_err(crate::err::Error::CBOR)
+        serde_cbor::from_slice(bytes).map_err(crate::err::Error::CBOR)
     }
 }
 
@@ -287,8 +287,8 @@ impl<T: DocumentLike> Store<T> {
                             .generate_id()
                             .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                    let serialized_inner = crate::serialize::serialize(inner)
-                        .map_err(sled::ConflictableTransactionError::Abort)?;
+                        let serialized_inner = crate::serialize::serialize(inner)
+                            .map_err(sled::ConflictableTransactionError::Abort)?;
 
                         let mut search_doc = inner
                             .as_index_document(&self.index.fields)
