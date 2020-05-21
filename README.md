@@ -76,6 +76,10 @@ See the example for usage. The following attributes can be used to customize the
 
 ## Changelog
 
+### 0.6.0
+
+* Add `serde-cbor` serialization support (thanks @minioin)
+
 ### 0.5.0
 
 * Add `Deref` to inner type on `Document`
@@ -98,6 +102,6 @@ See the example for usage. The following attributes can be used to customize the
 
 <hr/>
 
-Current version: 0.5.1
+Current version: 0.6.0
 
 License: MIT
