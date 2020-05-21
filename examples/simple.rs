@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate serde;
 
+use pallet::CollectionStore;
+
 #[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
 #[pallet(tree_name = "books")]
 pub struct Book {

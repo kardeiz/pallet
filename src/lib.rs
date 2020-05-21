@@ -1,96 +1,98 @@
+#![feature(specialization)]
 /*!
-A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
-
-Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
-but also Lucene/Elasticsearch style searching.
-
-The included `pallet_macros` crate provides an easy way to derive `pallet::DocumentLike` for data structs.
-
-# Usage
-
-```rust
-#[macro_use]
-extern crate serde;
-
-#[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
-#[pallet(tree_name = "books")]
-pub struct Book {
-    #[pallet(default_search_field)]
-    title: String,
-    #[pallet(default_search_field)]
-    description: Option<String>,
-    #[pallet(index_field_type = "u64")]
-    rating: u8,
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let temp_dir = tempfile::TempDir::new_in(".")?;
-
-    let db = sled::open(temp_dir.path().join("db"))?;
-
-    let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
-
-    let books = vec![
-        Book {
-            title: "The Old Man and the Sea".into(),
-            description: Some(
-                "He was an old man who fished alone in a skiff in \
-            the Gulf Stream and he had gone eighty-four days \
-            now without taking a fish."
-                    .into(),
-            ),
-            rating: 10,
-        },
-        Book {
-            title: "The Great Gatsby".into(),
-            description: Some("About a man and some other stuff".into()),
-            rating: 8,
-        },
-    ];
-
-    let _ = store.create_multi(&books)?;
-
-    let books = store.search("man AND rating:>8")?;
-
-    println!("{:?}", books);
-
-    Ok(())
-}
-```
-
-# `pallet_macros`
-
-See the example for usage. The following attributes can be used to customize the implementation:
-
+* A searchable document datastore built on [`sled`](https://docs.rs/sled) and [`tantivy`](https://docs.rs/tantivy).
+*
+* Provides a typed-tree interface to a `sled` database, with standard datastore ops (`find`, `create`, `update`, `delete`),
+* but also Lucene/Elasticsearch style searching.
+*
+* The included `pallet_macros` crate provides an easy way to derive `pallet::DocumentLike` for data structs.
+*
+* # Usage
+*
+* ```rust
+* #[macro_use]
+* extern crate serde;
+* use pallet::CollectionStore;
+*
+* #[derive(Serialize, Deserialize, Debug, pallet::DocumentLike)]
+* #[pallet(tree_name = "books")]
+* pub struct Book {
+*     #[pallet(default_search_field)]
+*     title: String,
+*     #[pallet(default_search_field)]
+*     description: Option<String>,
+*     #[pallet(index_field_type = "u64")]
+*     rating: u8,
+* }
+*
+* fn main() -> Result<(), Box<dyn std::error::Error>> {
+*     let temp_dir = tempfile::TempDir::new_in(".")?;
+*
+*     let db = sled::open(temp_dir.path().join("db"))?;
+*
+*     let store = pallet::Store::builder().with_db(db).with_index_dir(temp_dir.path()).finish()?;
+*
+*     let books = vec![
+*         Book {
+*             title: "The Old Man and the Sea".into(),
+*             description: Some(
+*                 "He was an old man who fished alone in a skiff in \
+*             the Gulf Stream and he had gone eighty-four days \
+*             now without taking a fish."
+*                     .into(),
+*             ),
+*             rating: 10,
+*         },
+*         Book {
+*             title: "The Great Gatsby".into(),
+*             description: Some("About a man and some other stuff".into()),
+*             rating: 8,
+*         },
+*     ];
+*
+*     let _ = store.create_multi(&books)?;
+*
+*     let books = store.search("man AND rating:>8")?;
+*
+*     println!("{:?}", books);
+*
+*     Ok(())
+* }
+* ```
+*
+* # `pallet_macros`
+*
+* See the example for usage. The following attributes can be used to customize the implementation:
+*
 * `tree_name`: A container level attribute to specify the `sled::Tree` name.
 * `index_field_name`: Rename the field in the search schema.
 * `index_field_type`: Set the index field type, must implement `Into<tantivy::schema::Value>`.
 * `index_field_options`: Set the index field options. By default, the options for `String` is
-`tantivy::schema::TEXT`, and the options for numeric types is `tantivy::schema::INDEXED`.
+* `tantivy::schema::TEXT`, and the options for numeric types is `tantivy::schema::INDEXED`.
 * `default_search_field`: Include this field in the list of default search fields.
 * `skip_indexing`: Do not index this field.
-
-# Changelog
-
-## 0.5.0
-
+*
+* # Changelog
+*
+* ## 0.5.0
+*
 * Add `Deref` to inner type on `Document`
 * Make index writer persistent
-
-## 0.4.0
-
+*
+* ## 0.4.0
+*
 * Add various builders.
 * Split out `index` and `tree` functionality.
 * Set up `search::Searcher` trait and other search helpers.
-
-## 0.3.2
-
+*
+* ## 0.3.2
+*
 * Add some docs
-
-## 0.3.0
-
+*
+* ## 0.3.0
+*
 * Add `pallet_macros` to derive `pallet::DocumentLike`
-
+*
 */
 
 use std::convert::TryInto;
@@ -202,6 +204,34 @@ pub struct Document<T> {
     pub inner: T,
 }
 
+pub trait CollectionStore<T> {
+    fn create(&self, data: &T) -> err::Result<u64>;
+    fn create_multi(&self, inners: &[T]) -> err::Result<Vec<u64>>;
+    fn update(&self, doc: &Document<T>) -> err::Result<()> {
+        self.update_multi(std::slice::from_ref(doc))
+    }
+
+    fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()>;
+
+    fn delete(&self, id: u64) -> err::Result<()> {
+        self.delete_multi(&[id])
+    }
+
+    /// Delete `Document`s by `id`s.
+    fn delete_multi(&self, ids: &[u64]) -> err::Result<()>;
+
+    /// Get all `Documents` from the datastore. Does not use the search index.
+    fn all(&self) -> err::Result<Vec<Document<T>>>;
+
+
+    /// Find a single `Document` by its `id`. Does not use the search index.
+    fn find(&self, id: u64) -> err::Result<Option<Document<T>>>;
+}
+
+pub trait Id {
+    fn id(&self) -> u64;
+}
+
 impl<T> std::ops::Deref for Document<T> {
     type Target = T;
 
@@ -223,14 +253,8 @@ pub struct Store<T: DocumentLike> {
     pub index: search::Index<T::IndexFieldsType>,
 }
 
-impl<T: DocumentLike> Store<T> {
-    /// Create a new builder
-    pub fn builder() -> StoreBuilder<T> {
-        StoreBuilder::default()
-    }
-
-    /// Create a new `Document`, returns the persisted document's `id`.
-    pub fn create(&self, inner: &T) -> err::Result<u64> {
+impl<T: DocumentLike> CollectionStore<T> for Store<T> {
+    default fn create(&self, inner: &T) -> err::Result<u64> {
         let id = self.tree.transaction(
             |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
                 let mut index_writer =
@@ -240,12 +264,12 @@ impl<T: DocumentLike> Store<T> {
                     self.tree.generate_id().map_err(sled::ConflictableTransactionError::Abort)?;
 
                 #[cfg(feature = "serde-bincode")]
-                let serialized_inner = crate::serialize::serialize(inner)
+                    let serialized_inner = crate::serialize::serialize(inner)
                     .map_err(err::Error::Bincode)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 #[cfg(feature = "cbor")]
-                let serialized_inner = crate::serialize::serialize(inner)
+                    let serialized_inner = crate::serialize::serialize(inner)
                     .map_err(err::Error::CBOR)
                     .map_err(sled::ConflictableTransactionError::Abort)?;
 
@@ -271,8 +295,7 @@ impl<T: DocumentLike> Store<T> {
         Ok(id)
     }
 
-    /// Create new `Document`s, returns the persisted documents' `id`s.
-    pub fn create_multi(&self, inners: &[T]) -> err::Result<Vec<u64>> {
+    default fn create_multi(&self, inners: &[T]) -> err::Result<Vec<u64>> {
         let ids = self.tree.transaction(
             |tree| -> sled::ConflictableTransactionResult<_, err::Error> {
                 let mut out = Vec::with_capacity(inners.len());
@@ -287,12 +310,12 @@ impl<T: DocumentLike> Store<T> {
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     #[cfg(feature = "serde-bincode")]
-                    let serialized_inner = crate::serialize::serialize(inner)
+                        let serialized_inner = crate::serialize::serialize(inner)
                         .map_err(err::Error::Bincode)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
                     #[cfg(feature = "cbor")]
-                    let serialized_inner = crate::serialize::serialize(inner)
+                        let serialized_inner = crate::serialize::serialize(inner)
                         .map_err(err::Error::CBOR)
                         .map_err(sled::ConflictableTransactionError::Abort)?;
 
@@ -321,27 +344,22 @@ impl<T: DocumentLike> Store<T> {
         Ok(ids)
     }
 
-    /// Update a given `Document`.
-    pub fn update(&self, doc: &Document<T>) -> err::Result<()> {
-        self.update_multi(std::slice::from_ref(doc))
-    }
-
     /// Update given `Document`s.
-    pub fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
+    default fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
                 self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
 
-                for Document { id, inner } in docs {
-                    #[cfg(feature = "serde-bincode")]
+            for Document { id, inner } in docs {
+                #[cfg(feature = "serde-bincode")]
                     let serialized_inner = crate::serialize::serialize(inner)
-                        .map_err(err::Error::Bincode)
-                        .map_err(sled::ConflictableTransactionError::Abort)?;
+                    .map_err(err::Error::Bincode)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
 
-                    #[cfg(feature = "cbor")]
+                #[cfg(feature = "cbor")]
                     let serialized_inner = crate::serialize::serialize(inner)
-                        .map_err(err::Error::CBOR)
-                        .map_err(sled::ConflictableTransactionError::Abort)?;
+                    .map_err(err::Error::CBOR)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
 
                 let mut search_doc = inner
                     .as_index_document(&self.index.fields)
@@ -367,13 +385,184 @@ impl<T: DocumentLike> Store<T> {
         Ok(())
     }
 
-    /// Delete a `Document` by `id`.
-    pub fn delete(&self, id: u64) -> err::Result<()> {
-        self.delete_multi(&[id])
+    /// Delete `Document`s by `id`s.
+    default fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
+        self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
+            let mut index_writer =
+                self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
+
+            for id in ids {
+                index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+
+                tree.remove(&id.to_le_bytes())?;
+            }
+
+            index_writer
+                .commit()
+                .map_err(err::Error::Tantivy)
+                .map_err(sled::ConflictableTransactionError::Abort)?;
+
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+    /// Get all `Documents` from the datastore. Does not use the search index.
+    default fn all(&self) -> err::Result<Vec<Document<T>>> {
+        Ok(self
+            .tree
+            .iter()
+            .flatten()
+            .map(|(k, v)| {
+                Ok(Document {
+                    id: u64::from_le_bytes(k.as_ref().try_into().map_err(err::custom)?),
+                    inner: crate::serialize::deserialize(&v)?,
+                })
+            })
+            .collect::<err::Result<Vec<_>>>()?)
+    }
+
+    /// Find a single `Document` by its `id`. Does not use the search index.
+    default fn find(&self, id: u64) -> err::Result<Option<Document<T>>> {
+        Ok(self
+            .tree
+            .get(id.to_le_bytes())?
+            .map(|bytes| crate::serialize::deserialize(&bytes))
+            .transpose()?
+            .map(|inner| Document { id, inner }))
+    }
+}
+
+impl<T: DocumentLike + Id> CollectionStore<T> for Store<T> {
+    fn create(&self, inner: &T) -> err::Result<u64> {
+        let id = self.tree.transaction(
+            |tree| -> sled::ConflictableTransactionResult<u64, err::Error> {
+                let mut index_writer =
+                    self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
+
+                let id = inner.id();
+
+                #[cfg(feature = "serde-bincode")]
+                    let serialized_inner = crate::serialize::serialize(inner)
+                    .map_err(err::Error::Bincode)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                #[cfg(feature = "cbor")]
+                    let serialized_inner = crate::serialize::serialize(inner)
+                    .map_err(err::Error::CBOR)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                let mut search_doc = inner
+                    .as_index_document(&self.index.fields)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                search_doc.add_u64(self.index.id_field, id);
+
+                index_writer.add_document(search_doc);
+
+                tree.insert(&id.to_le_bytes(), serialized_inner)?;
+
+                index_writer
+                    .commit()
+                    .map_err(err::Error::Tantivy)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                Ok(id)
+            },
+        )?;
+
+        Ok(id)
+    }
+
+    fn create_multi(&self, inners: &[T]) -> err::Result<Vec<u64>> {
+        let ids = self.tree.transaction(
+            |tree| -> sled::ConflictableTransactionResult<_, err::Error> {
+                let mut out = Vec::with_capacity(inners.len());
+
+                let mut index_writer =
+                    self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
+
+                for inner in inners {
+                    let id = inner.id();
+
+                    #[cfg(feature = "serde-bincode")]
+                        let serialized_inner = crate::serialize::serialize(inner)
+                        .map_err(err::Error::Bincode)
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                    #[cfg(feature = "cbor")]
+                        let serialized_inner = crate::serialize::serialize(inner)
+                        .map_err(err::Error::CBOR)
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                    let mut search_doc = inner
+                        .as_index_document(&self.index.fields)
+                        .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                    search_doc.add_u64(self.index.id_field, id);
+
+                    index_writer.add_document(search_doc);
+
+                    tree.insert(&id.to_le_bytes(), serialized_inner)?;
+
+                    out.push(id);
+                }
+
+                index_writer
+                    .commit()
+                    .map_err(err::Error::Tantivy)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                Ok(out)
+            },
+        )?;
+
+        Ok(ids)
+    }
+
+    /// Update given `Document`s.
+    fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
+        self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
+            let mut index_writer =
+                self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
+
+            for Document { id, inner } in docs {
+                #[cfg(feature = "serde-bincode")]
+                    let serialized_inner = crate::serialize::serialize(inner)
+                    .map_err(err::Error::Bincode)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                #[cfg(feature = "cbor")]
+                    let serialized_inner = crate::serialize::serialize(inner)
+                    .map_err(err::Error::CBOR)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                let mut search_doc = inner
+                    .as_index_document(&self.index.fields)
+                    .map_err(sled::ConflictableTransactionError::Abort)?;
+
+                search_doc.add_u64(self.index.id_field, *id);
+
+                index_writer.delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+
+                index_writer.add_document(search_doc);
+
+                tree.insert(&id.to_le_bytes(), serialized_inner)?;
+            }
+
+            index_writer
+                .commit()
+                .map_err(err::Error::Tantivy)
+                .map_err(sled::ConflictableTransactionError::Abort)?;
+
+            Ok(())
+        })?;
+
+        Ok(())
     }
 
     /// Delete `Document`s by `id`s.
-    pub fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
+    fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
         self.tree.transaction(|tree| -> sled::ConflictableTransactionResult<_, err::Error> {
             let mut index_writer =
                 self.index.writer.lock().map_err(err::custom).map_err(sled::ConflictableTransactionError::Abort)?;
@@ -395,13 +584,8 @@ impl<T: DocumentLike> Store<T> {
         Ok(())
     }
 
-    /// Search the datastore, using the query language provided by `tantivy`.
-    pub fn search<I: search::Searcher<T>>(&self, searcher: I) -> Result<I::Item, I::Error> {
-        searcher.search(self)
-    }
-
     /// Get all `Documents` from the datastore. Does not use the search index.
-    pub fn all(&self) -> err::Result<Vec<Document<T>>> {
+    fn all(&self) -> err::Result<Vec<Document<T>>> {
         Ok(self
             .tree
             .iter()
@@ -413,6 +597,28 @@ impl<T: DocumentLike> Store<T> {
                 })
             })
             .collect::<err::Result<Vec<_>>>()?)
+    }
+
+    /// Find a single `Document` by its `id`. Does not use the search index.
+    fn find(&self, id: u64) -> err::Result<Option<Document<T>>> {
+        Ok(self
+            .tree
+            .get(id.to_le_bytes())?
+            .map(|bytes| crate::serialize::deserialize(&bytes))
+            .transpose()?
+            .map(|inner| Document { id, inner }))
+    }
+}
+
+impl<T: DocumentLike> Store<T> {
+    /// Create a new builder
+    pub fn builder() -> StoreBuilder<T> {
+        StoreBuilder::default()
+    }
+
+    /// Search the datastore, using the query language provided by `tantivy`.
+    pub fn search<I: search::Searcher<T>>(&self, searcher: I) -> Result<I::Item, I::Error> {
+        searcher.search(self)
     }
 
     /// Index (or re-index) all `Documents` in the datastore.
@@ -434,16 +640,6 @@ impl<T: DocumentLike> Store<T> {
         index_writer.commit()?;
 
         Ok(())
-    }
-
-    /// Find a single `Document` by its `id`. Does not use the search index.
-    pub fn find(&self, id: u64) -> err::Result<Option<Document<T>>> {
-        Ok(self
-            .tree
-            .get(id.to_le_bytes())?
-            .map(|bytes| crate::serialize::deserialize(&bytes))
-            .transpose()?
-            .map(|inner| Document { id, inner }))
     }
 }
 

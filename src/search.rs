@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
-use crate::{err, Document, DocumentLike, Store};
+use crate::{err, Document, DocumentLike, Store, CollectionStore};
 
 mod as_query;
 mod field_value;

@@ -11,34 +11,34 @@ pub struct Collector<T>(pub(crate) T);
 pub struct Handler<T>(pub(crate) T);
 
 /**
-Builder to prepare search execution
-
-## Usage:
-
-```rust
-use pallet::{err, search, Store, DocumentLike};
-
-fn search<T: DocumentLike>(store: &Store<T>, query: &str) -> err::Result<search::Results<T>> {
-    let scored_ids_handle = search::ScoredIds { size_hint: None, id_field: store.index.id_field };
-    let count_handle = tantivy::collector::Count;
-
-    let search_params = search::Params::default()
-        .with_query(query)
-        .with_collector((count_handle, scored_ids_handle))
-        .with_handler(|(count, scored_ids)| -> err::Result<_> {
-            let hits = scored_ids
-                .into_iter()
-                .map(|search::ScoredId { id, score }| {
-                    store.find(id).map(|opt_doc| opt_doc.map(|doc| search::Hit { doc, score }))
-                })
-                .filter_map(Result::transpose)
-                .collect::<err::Result<Vec<_>>>()?;
-
-            Ok(search::Results { count, hits })
-        });
-    Ok(store.search(search_params)?)
-}
-```
+* Builder to prepare search execution
+*
+* ## Usage:
+*
+* ```rust
+* use pallet::{err, search, Store, DocumentLike, CollectionStore};
+*
+* fn search<T: DocumentLike>(store: &Store<T>, query: &str) -> err::Result<search::Results<T>> {
+*     let scored_ids_handle = search::ScoredIds { size_hint: None, id_field: store.index.id_field };
+*     let count_handle = tantivy::collector::Count;
+*
+*     let search_params = search::Params::default()
+*         .with_query(query)
+*         .with_collector((count_handle, scored_ids_handle))
+*         .with_handler(|(count, scored_ids)| -> err::Result<_> {
+*             let hits = scored_ids
+*                 .into_iter()
+*                 .map(|search::ScoredId { id, score }| {
+*                     store.find(id).map(|opt_doc| opt_doc.map(|doc| search::Hit { doc, score }))
+*                 })
+*                 .filter_map(Result::transpose)
+*                 .collect::<err::Result<Vec<_>>>()?;
+*
+*             Ok(search::Results { count, hits })
+*         });
+*     Ok(store.search(search_params)?)
+* }
+* ```
 */
 pub struct Params<Q, C, H> {
     pub(crate) query: Q,
