@@ -30,7 +30,7 @@ impl tantivy::collector::Collector for ScoredIds {
     ) -> tantivy::Result<Self::Child> {
         Ok(ScoredIdsSegmentCollector {
             buffer: self.size_hint.map(Vec::with_capacity).unwrap_or_else(Vec::new),
-            id_field_reader: segment.fast_fields().u64(self.id_field.clone()),
+            id_field_reader: segment.fast_fields().u64(self.id_field.clone()).ok(),
         })
     }
 
