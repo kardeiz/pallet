@@ -76,6 +76,10 @@ See the example for usage. The following attributes can be used to customize the
 
 ## Changelog
 
+### 0.7.0
+
+* Update sled/tantivy deps (thanks @lberezy)
+
 ### 0.6.0
 
 * Add `serde-cbor` serialization support (thanks @minioin)
@@ -102,6 +106,6 @@ See the example for usage. The following attributes can be used to customize the
 
 <hr/>
 
-Current version: 0.6.0
+Current version: 0.7.0
 
 License: MIT
