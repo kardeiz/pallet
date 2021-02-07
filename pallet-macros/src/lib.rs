@@ -58,8 +58,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
         return Ok(None);
     }
 
-    let is_default_search_field =
-        l_attrs.clone().any(|x| x.path() == &default_search_field_path);
+    let is_default_search_field = l_attrs.clone().any(|x| x.path() == &default_search_field_path);
 
     if let Some(index_field_name) = l_attrs
         .clone()
@@ -110,13 +109,7 @@ fn handle_field(input: &syn::Field) -> Result<Option<FieldMeta>, Box<dyn std::er
         opts = index_fields_options;
     }
 
-    Ok(Some(FieldMeta {
-        ident: ident.clone(),
-        name,
-        ty,
-        opts,
-        is_default_search_field,
-    }))
+    Ok(Some(FieldMeta { ident: ident.clone(), name, ty, opts, is_default_search_field }))
 }
 
 fn document_derive_inner(
@@ -177,7 +170,7 @@ fn document_derive_inner(
         .collect::<Vec<_>>();
 
     let doc_fields = field_metas.iter().enumerate()
-        .map(|(idx, FieldMeta { ident, ty, .. })| 
+        .map(|(idx, FieldMeta { ident, ty, .. })|
             quote! {
                 if let Some(val) = <#ty as pallet::search::FieldValue>::into_value(self.#ident.clone().into()) {
                     doc.add(pallet::ext::tantivy::schema::FieldValue::new(fields[#idx], val));

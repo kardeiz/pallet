@@ -1,6 +1,6 @@
 [package]
 name = "pallet"
-version = "0.6.1"
+version = "0.7.0"
 authors = ["Jacob Brown <kardeiz@gmail.com>"]
 edition = "2018"
 license = "MIT"

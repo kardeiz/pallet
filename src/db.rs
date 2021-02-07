@@ -3,7 +3,6 @@ use std::ops::Deref;
 
 /// Wrapper for `sled::Tree` and its `sled::Db` (included for `id` generation)
 pub struct Tree {
-    db: sled::Db,
     inner: sled::Tree,
 }
 
@@ -19,10 +18,6 @@ impl Tree {
     /// Create a new builder
     pub fn builder() -> TreeBuilder {
         TreeBuilder::default()
-    }
-
-    pub(crate) fn generate_id(&self) -> err::Result<u64> {
-        Ok(self.db.generate_id()?)
     }
 }
 
@@ -60,6 +55,6 @@ impl TreeBuilder {
 
         let inner = db.open_tree(tree_name.as_bytes())?;
 
-        Ok(Tree { inner, db })
+        Ok(Tree { inner })
     }
 }

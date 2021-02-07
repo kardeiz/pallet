@@ -244,8 +244,7 @@ impl<T: DocumentLike> Store<T> {
         let id = self.tree.transaction(
             |tree| -> sled::transaction::ConflictableTransactionResult<u64, err::Error> {
                 self.index.with_writer(|index_writer| {
-                    let id = tree
-                        .generate_id()?;
+                    let id = tree.generate_id()?;
 
                     let serialized_inner = crate::serialize::serialize(inner)
                         .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
@@ -280,8 +279,7 @@ impl<T: DocumentLike> Store<T> {
                 self.index.with_writer(|index_writer| {
                     let mut out = Vec::with_capacity(inners.len());
                     for inner in inners {
-                        let id = tree
-                            .generate_id()?;
+                        let id = tree.generate_id()?;
 
                         let serialized_inner = crate::serialize::serialize(inner)
                             .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
@@ -319,34 +317,36 @@ impl<T: DocumentLike> Store<T> {
 
     /// Update given `Document`s.
     pub fn update_multi(&self, docs: &[Document<T>]) -> err::Result<()> {
-        self.tree.transaction(|tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
-            self.index.with_writer(|index_writer| {
-                for Document { id, inner } in docs {
-                    let serialized_inner = crate::serialize::serialize(inner)
-                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
+        self.tree.transaction(
+            |tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
+                self.index.with_writer(|index_writer| {
+                    for Document { id, inner } in docs {
+                        let serialized_inner = crate::serialize::serialize(inner)
+                            .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                    let mut search_doc = inner
-                        .as_index_document(&self.index.fields)
-                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
+                        let mut search_doc = inner
+                            .as_index_document(&self.index.fields)
+                            .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                    search_doc.add_u64(self.index.id_field, *id);
+                        search_doc.add_u64(self.index.id_field, *id);
+
+                        index_writer
+                            .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+
+                        index_writer.add_document(search_doc);
+
+                        tree.insert(&id.to_le_bytes(), serialized_inner)?;
+                    }
 
                     index_writer
-                        .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+                        .commit()
+                        .map_err(err::Error::Tantivy)
+                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                    index_writer.add_document(search_doc);
-
-                    tree.insert(&id.to_le_bytes(), serialized_inner)?;
-                }
-
-                index_writer
-                    .commit()
-                    .map_err(err::Error::Tantivy)
-                    .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
-
-                Ok(())
-            })
-        })?;
+                    Ok(())
+                })
+            },
+        )?;
 
         Ok(())
     }
@@ -358,23 +358,25 @@ impl<T: DocumentLike> Store<T> {
 
     /// Delete `Document`s by `id`s.
     pub fn delete_multi(&self, ids: &[u64]) -> err::Result<()> {
-        self.tree.transaction(|tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
-            self.index.with_writer(|index_writer| {
-                for id in ids {
+        self.tree.transaction(
+            |tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
+                self.index.with_writer(|index_writer| {
+                    for id in ids {
+                        index_writer
+                            .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+
+                        tree.remove(&id.to_le_bytes())?;
+                    }
+
                     index_writer
-                        .delete_term(tantivy::Term::from_field_u64(self.index.id_field, *id));
+                        .commit()
+                        .map_err(err::Error::Tantivy)
+                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                    tree.remove(&id.to_le_bytes())?;
-                }
-
-                index_writer
-                    .commit()
-                    .map_err(err::Error::Tantivy)
-                    .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
-
-                Ok(())
-            })
-        })?;
+                    Ok(())
+                })
+            },
+        )?;
 
         Ok(())
     }
@@ -438,24 +440,26 @@ impl<T: DocumentLike> Store<T> {
             .map(|x| x.map_err(err::Error::from))
             .collect::<err::Result<Vec<_>>>()?;
 
-        self.tree.transaction(|tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
-            for key in &keys {
-                tree.remove(key)?;
-            }
-            self.index.with_writer(|index_writer| {
-                index_writer
-                    .delete_all_documents()
-                    .map_err(err::Error::Tantivy)
-                    .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
+        self.tree.transaction(
+            |tree| -> sled::transaction::ConflictableTransactionResult<_, err::Error> {
+                for key in &keys {
+                    tree.remove(key)?;
+                }
+                self.index.with_writer(|index_writer| {
+                    index_writer
+                        .delete_all_documents()
+                        .map_err(err::Error::Tantivy)
+                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                index_writer
-                    .commit()
-                    .map_err(err::Error::Tantivy)
-                    .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
+                    index_writer
+                        .commit()
+                        .map_err(err::Error::Tantivy)
+                        .map_err(sled::transaction::ConflictableTransactionError::Abort)?;
 
-                Ok(())
-            })
-        })?;
+                    Ok(())
+                })
+            },
+        )?;
 
         Ok(())
     }
